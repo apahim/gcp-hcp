@@ -59,6 +59,7 @@ Use GCP Privileged Access Manager (PAM) combined with GCP Resource Tags and IAM 
 ### Negative
 
 * During a PAM grant window, the operator has `roles/workflows.invoker` on all workflows (not just the gated one) — acceptable since non-gated workflows were already permanently accessible
+* IAM is additive — if a principal has another role that includes `workflows.run` (e.g., `roles/owner`, `roles/editor`, or a custom role), the tag-based IAM condition is bypassed because the unconditional binding grants access regardless. PAM-gated workflows only work when the caller's invoke access comes exclusively from the conditioned `roles/workflows.invoker` binding.
 * Tag management is a privileged operation — anyone with `roles/resourcemanager.tagUser` could remove the `pam-gated` tag from a workflow, bypassing the gate. Tag management permissions must be restricted.
 * IAM condition evaluation is not instantaneous after tag changes — token caching means there may be a propagation delay
 * PAM approval adds latency to the operational workflow — operators must request and wait for approval before acting. This is by design for sensitive operations but could slow incident response if approval is not timely.

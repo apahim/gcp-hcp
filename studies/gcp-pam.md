@@ -343,6 +343,7 @@ This pattern is documented for future implementation. The current PoC uses the p
 
 ## Security Considerations
 
+- **IAM is additive — overlapping roles bypass PAM gating**: If a principal has another role that includes `workflows.run` (e.g., `roles/owner`, `roles/editor`, or a custom role), the tag-based IAM condition on `roles/workflows.invoker` is irrelevant because the other binding grants unconditional access. PAM-gated workflows only work when the caller's invoke access comes exclusively from the conditioned binding. Ensure no overlapping roles grant workflow invoke permissions to PAM-eligible principals.
 - **Tag management is privileged**: Anyone with `roles/resourcemanager.tagUser` can attach tags that satisfy IAM conditions. Treat tag management as a security-sensitive operation and restrict this role.
 - **IAM condition evaluation timing**: IAM condition evaluation may not be instantaneous after tag changes due to token caching and expiry. Plan for propagation delay.
 - **Avoid self-escalation roles**: Do not include roles that allow self-escalation (`setIamPolicy`, `iam.roles.update`) in entitlements. A principal with these roles could grant themselves permanent access, defeating PAM.
