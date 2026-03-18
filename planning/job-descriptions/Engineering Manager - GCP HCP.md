@@ -3,9 +3,9 @@
 
 **Job Summary**
 
-Red Hat Engineering is looking for a Software Engineering Manager to join the GCP Hosted Control Planes (HCP) team. This team builds and operates a managed service delivering OpenShift Kubernetes clusters on Google Cloud Platform using HyperShift.
+Red Hat Engineering is looking for a Software Engineering Manager to join the GCP Hosted Control Planes (HCP) team. This team builds and operates a managed service that enables organizations to run OpenShift Kubernetes clusters on Google Cloud Platform using HyperShift, hosting multiple Kubernetes control planes on shared GKE infrastructure to reduce cost and operational overhead for customers.
 
-This team operates differently from a traditional software engineering organization. We practice an agent-first development methodology where AI coding agents are a primary production mechanism, and our engineers function as harness engineers — designing environments, specifying intent, and building feedback loops that enable agents to produce reliable work. As Engineering Manager, you will lead a team through this evolving model: hiring engineers who thrive in agent-augmented workflows, developing your team's harness engineering skills, establishing processes that maintain quality and velocity when much of the code is agent-generated, and defining what engineering excellence looks like when the engineer's primary job is no longer typing code.
+This team operates differently from a traditional software engineering organization. Our team practices an agent-first development methodology where AI coding agents are a primary mechanism for producing, testing, and maintaining code. Engineers on this team function as harness engineers: they design the environments, constraints, and feedback loops that enable AI agents to do reliable work. As Engineering Manager, you will lead a team through this evolving model: hiring engineers who thrive in agent-augmented workflows, developing your team's harness engineering skills, establishing processes that maintain quality and velocity when much of the code is agent-generated, and defining what engineering excellence looks like when the engineer's primary job is no longer typing code.
 
 You will manage project delivery, people development, and cross-team coordination for a platform that runs multi-region managed OpenShift clusters on GCP. You'll need enough technical depth to engage meaningfully with your team's architectural discussions and enough management skill to develop engineers, navigate organizational complexity, and ship reliably in a fast-moving market.
 
@@ -29,7 +29,7 @@ You will manage project delivery, people development, and cross-team coordinatio
 * 3+ years of experience managing software engineering teams, including hiring, performance management, and career development
 * Demonstrated ability to manage distributed, remote engineering teams working across multiple time zones
 * Technical background sufficient to engage in architectural discussions about Kubernetes, cloud infrastructure, and distributed systems — you don't need to be the deepest technical expert, but you need to understand the work and make sound judgment calls about technical risk and quality
-* Experience with Agile project management methodologies (scrum, kanban)
+* Experience with Agile project management methodologies (Scrum, Kanban)
 * Familiarity with AI-assisted development tools and workflows, or demonstrated ability and willingness to learn rapidly — you will need to understand how agent-augmented development works to manage a team practicing it daily
 * Strong communication skills with the ability to discuss technical topics with engineers, product managers, and senior leadership
 * Experience with at least one major public cloud platform (GCP, AWS, or Azure)
@@ -43,4 +43,4 @@ You will manage project delivery, people development, and cross-team coordinatio
 * Experience with GCP services, GKE, or Google Cloud networking and identity
 * Background in open source software development and community engagement
 * Experience managing teams through significant changes in tooling, process, or organizational structure
-* Familiarity with the concepts of harness engineering: designing constraints as enablers, building feedback loops for automated code generation, maintaining documentation as system-of-record for AI agents, and measuring engineering effectiveness in agent-augmented teams
+* Familiarity with the concepts of harness engineering: designing constraints as enablers, building feedback loops for automated code generation, maintaining documentation as source of truth for AI agents, and measuring engineering effectiveness in agent-augmented teams

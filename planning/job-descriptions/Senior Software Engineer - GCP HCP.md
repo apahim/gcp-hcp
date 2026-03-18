@@ -14,7 +14,7 @@ You'll work as part of a distributed engineering team, contributing to a platfor
 * Design and implement features, bug fixes, and infrastructure automation for the GCP HCP platform using Go and Kubernetes
 * Work within an agent-augmented development workflow: decompose work into well-specified tasks, guide AI agents through implementation, and rigorously review agent-generated code and tests
 * Write and maintain custom linters, structural tests, and CI gate checks that enforce architectural boundaries and prevent drift — for both human and agent contributors
-* Contribute to the team's structured documentation system (design documents, architecture decision records, AGENTS.md context files) that serves as the system of record for AI agents and humans alike
+* Contribute to the team's structured documentation system (design documents, architecture decision records, AGENTS.md context files) that serves as the source of truth for AI agents and humans alike
 * Build and maintain the observability, deployment pipelines, and automation that support multi-region managed OpenShift clusters on GCP
 * Participate in peer code reviews with a focus on correctness, security, and adherence to established architectural constraints
 * Own test strategy for the features you deliver — design test plans, write unit and integration tests, and ensure end-to-end coverage across the platform's multi-region architecture
@@ -24,10 +24,10 @@ You'll work as part of a distributed engineering team, contributing to a platfor
 
 **Required Skills**
 
-* Bachelor's degree in computer science, or equivalent related work experience
+* Bachelor's degree in Computer Science, or equivalent related work experience
 * 5+ years of experience developing software in a Linux environment, with strong proficiency in Go
 * Experience with the Kubernetes ecosystem, including writing and operating controllers and operators
-* Familiarity with at least one major public cloud platform (GCP preferred; AWS or Azure also relevant)
+* Experience with at least one major public cloud platform (GCP preferred; AWS or Azure also relevant)
 * Experience with distributed version control (Git) and CI/CD systems
 * Good understanding of Linux operating systems and container runtimes
 * Demonstrated ability to review code critically and troubleshoot complex issues in distributed systems
