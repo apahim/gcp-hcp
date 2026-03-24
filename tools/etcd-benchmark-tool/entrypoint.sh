@@ -41,13 +41,28 @@ run_cleanup() {
   k8s_count=$(ectl get --prefix /kubernetes.io/ \
     --count-only --write-out=fields --command-timeout=60s 2>/dev/null \
     | grep '"Count"' | awk '{print $NF}') || true
-  echo "Kubernetes keys (/kubernetes.io/): ${k8s_count:-0}"
 
   total_before=$(ectl get "" --from-key \
     --count-only --write-out=fields --command-timeout=60s 2>/dev/null \
     | grep '"Count"' | awk '{print $NF}') || true
-  benchmark_keys=$((${total_before:-0} - ${k8s_count:-0}))
-  echo "Total keys: ${total_before:-0}, Benchmark keys to delete: ${benchmark_keys}"
+
+  # Fail closed: if either probe failed, refuse to delete unless forced
+  if [ -z "$k8s_count" ] || [ -z "$total_before" ]; then
+    if [ "${FORCE_CLEANUP:-false}" = "true" ]; then
+      echo "WARNING: etcd probe failed but FORCE_CLEANUP=true, proceeding"
+      k8s_count=${k8s_count:-0}
+      total_before=${total_before:-0}
+    else
+      echo "ERROR: Failed to query etcd key counts (k8s_count='${k8s_count}', total='${total_before}')"
+      echo "       Set FORCE_CLEANUP=true to override this safety check."
+      return 1
+    fi
+  fi
+
+  echo "Kubernetes keys (/kubernetes.io/): ${k8s_count}"
+
+  benchmark_keys=$((total_before - k8s_count))
+  echo "Total keys: ${total_before}, Benchmark keys to delete: ${benchmark_keys}"
 
   if [ "${benchmark_keys}" -le 0 ]; then
     echo "No benchmark keys to delete."
