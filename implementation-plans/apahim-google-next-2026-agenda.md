@@ -9,8 +9,8 @@
 
 ## At a glance
 
-- **21 sessions** across 3 days (7 Wed, 8 Thu, 6 Fri) + **28 sessions suggestions** for the team
-- **2 keynotes**, **15 breakouts**, **1 workshop**, **1 developer meetup**, **1 discussion group**
+- **20 sessions** across 3 days (7 Wed, 8 Thu, 5 Fri) + **28 sessions suggestions** for the team
+- **2 keynotes**, **14 breakouts**, **1 workshop**, **1 developer meetup**, **1 discussion group**, **1 solution talk**
 
 ## Themes
 - Wed: **Agents + platform strategy** day (agent security, production agents, GKE roadmap, ADK)
