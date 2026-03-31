@@ -37,7 +37,7 @@ Configure end-to-end tests for the GCP platform in the HyperShift repository. Th
 │                 ▼                                                                   │
 │  3. Create Dynamic Projects (under CI folder)                                       │
 │     `gcloud projects create ${INFRA_ID}-control-plane --folder=${CI_FOLDER_ID}`              │
-│     `gcloud projects create ${INFRA_ID}-hosted-clusteromer --folder=${CI_FOLDER_ID}`          │
+│     `gcloud projects create ${INFRA_ID}-hosted-cluster --folder=${CI_FOLDER_ID}`          │
 │                 │                                                                   │
 │                 ▼                                                                   │
 │  ┌────────────────────────────────────┐    ┌────────────────────────────────────┐   │
@@ -92,7 +92,7 @@ Configure end-to-end tests for the GCP platform in the HyperShift repository. Th
 │                 │                                                                   │
 │                 ▼                                                                   │
 │  12. Delete Dynamic Projects (all remaining resources deleted with projects)        │
-│      `gcloud projects delete ${INFRA_ID}-hosted-clusteromer --quiet`                          │
+│      `gcloud projects delete ${INFRA_ID}-hosted-cluster --quiet`                          │
 │      `gcloud projects delete ${INFRA_ID}-control-plane --quiet`                              │
 │                 │                                                                   │
 │                 ▼                                                                   │
@@ -156,7 +156,7 @@ Before implementing the CI infrastructure, we need team decisions on several arc
 **Summary**: Create CI folder, service account with project creator permissions, and store credentials in Vault
 
 **Description**:
-Set up the GCP infrastructure for dynamic project creation. Each E2E test run will create its own management and hosted-cluster projects under a dedicated CI folder, ensuring complete isolation between tests.
+Set up the GCP infrastructure for dynamic project creation. Each E2E test run will create its own control-plane and hosted-cluster projects under a dedicated CI folder, ensuring complete isolation between tests.
 
 **Tasks**:
 1. **Create CI Folder** (manual, following GCP HCP Commons pattern):
@@ -291,7 +291,7 @@ ci-operator/step-registry/aks/              # openshift/release
 **Deliverables**:
 
 1. **Step Registry Structure** (`ci-operator/step-registry/hypershift/gcp/`):
-   ```
+   ```text
    ci-operator/step-registry/hypershift/gcp/
    ├── OWNERS
    ├── control-plane-setup/
