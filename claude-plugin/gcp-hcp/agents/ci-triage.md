@@ -320,7 +320,7 @@ When the user says "watch until green", "run until all pass", or "keep trying":
    ```bash
    # Check if any checks are still running
    gh pr checks ${PR_NUMBER} --repo ${REPO_SLUG} --json state \
-     --jq '[.[] | select(.state == "PENDING" or .state == "QUEUED")] | length'
+     --jq '[.[] | select(.state == "PENDING" or .state == "QUEUED" or .state == "IN_PROGRESS")] | length'
    ```
 4. **Poll interval:** Wait 2-3 minutes between checks to avoid API rate limits
 5. **Re-evaluate:** Once CI completes, check status again:
@@ -362,8 +362,8 @@ gh pr view ${PR_NUMBER} --repo ${REPO_SLUG} --json comments \
 **Status check command:**
 ```bash
 # Summary of all checks
-gh pr checks ${PR_NUMBER} --repo ${REPO_SLUG} --json name,state,conclusion \
-  --jq 'group_by(.conclusion) | map({conclusion: .[0].conclusion, count: length})'
+gh pr checks ${PR_NUMBER} --repo ${REPO_SLUG} --json name,state \
+  --jq 'group_by(.state) | map({state: .[0].state, count: length})'
 ```
 
 ### Watch Mode Output
