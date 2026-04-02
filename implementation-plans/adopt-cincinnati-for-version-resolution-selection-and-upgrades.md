@@ -46,13 +46,13 @@ sequenceDiagram
     participant HC as HostedCluster
 
     User->>CLI: gcphcp clusters create --version 4.22.0-ec.4
-    CLI->>Backend: POST /api/v1/clusters<br/>(release.version: "4.22.0-ec.4", channelGroup: "candidate")
+    CLI->>Backend: POST /api/v1/clusters<br/>(release.version: "4.22.0-ec.4", release.channelGroup: "candidate")
     Backend->>Backend: Validate version format against API schema pattern
     Backend->>Backend: Store in spec (immutable)
     Backend-->>CLI: Cluster created
     Backend->>VRC: Pub/Sub: cluster.created
     VRC->>Backend: GET /api/v1/clusters/:id
-    Backend-->>VRC: Cluster spec (release.version + channelGroup)
+    Backend-->>VRC: Cluster spec (release.version + release.channelGroup)
     VRC->>Cincinnati: GET /graph?channel=candidate-4.22&arch=amd64
     Cincinnati-->>VRC: nodes[] with version + payload
     VRC->>VRC: Find exact match 4.22.0-ec.4 → image pullspec
@@ -173,9 +173,9 @@ The controller reports the resolved image as a status condition:
 
 ```go
 update := sdk.NewStatusUpdate(clusterID, "cls-version-resolution-controller", generation)
-update.SetMetadata("release.image", resolvedImage)
-update.SetMetadata("release.version", resolvedVersion)
-update.SetMetadata("release.channel", channel)
+update.SetMetadata("release_image", resolvedImage)
+update.SetMetadata("release_version", resolvedVersion)
+update.SetMetadata("release_channel", channel)
 update.SetAppliedTrue("VersionResolved", fmt.Sprintf("Resolved %s to %s", minorVersion, resolvedVersion))
 client.ReportStatus(update)
 ```
