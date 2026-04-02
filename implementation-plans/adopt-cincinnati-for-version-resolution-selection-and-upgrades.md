@@ -2,12 +2,36 @@
 
 ## Overview
 
-This document describes the implementation plan for replacing the hardcoded release image with dynamic version resolution via Cincinnati, enabling OCP version selection during cluster creation and basic upgrade support across the GCP HCP stack (CLI, Backend, Controller).
+This document describes the implementation plan for replacing the hardcoded release image with controller-driven version resolution via Cincinnati, enabling OCP version selection during cluster creation across the GCP HCP stack (CLI, Backend, Controller).
 
 **Design Decision**: [adopt-cincinnati-for-version-resolution](../design-decisions/adopt-cincinnati-for-version-resolution.md)
 
+## Architecture
 
-## Component Flow
+```
+User
+  │  --version 4.22.0-ec.4 --channel-group candidate
+  ▼
+CLI (gcphcp)
+  │  POST /api/v1/clusters (release.version: "4.22.0-ec.4", release.channelGroup: "candidate")
+  ▼
+Backend (cls-backend)
+  │  Validates version format against API schema pattern
+  │  Stores release.version + release.channelGroup in spec
+  │  Publishes cluster.created event
+  ▼
+Version Resolution Controller (NEW)
+  │  Reads release.version + release.channelGroup from spec
+  │  Queries Cincinnati: GET /graph?channel=candidate-4.22&arch=amd64
+  │  Finds exact match for 4.22.0-ec.4 → image pullspec
+  │  Reports resolved image as status condition
+  ▼
+HC Templating Controller (existing)
+  │  Reads resolved image from status condition
+  │  Templates HostedCluster CR with spec.release.image
+  ▼
+HyperShift HostedCluster
+```
 
 ### Version Selection at Cluster Creation
 
@@ -16,82 +40,113 @@ sequenceDiagram
     participant User
     participant CLI as gcp-hcp CLI
     participant Backend as CLS Backend
+    participant VRC as Version Resolution Controller
     participant Cincinnati
-    participant Controller as CLS Controller
+    participant HCC as HC Templating Controller
     participant HC as HostedCluster
 
-    User->>CLI: gcphcp clusters create --version 4.22.0
-    CLI->>Backend: POST /api/v1/clusters<br/>(release.version: "4.22.0")
-    Backend->>Cincinnati: GET /graph?channel=stable-4.22&arch=amd64
-    Cincinnati-->>Backend: nodes[] with version + image
-    Backend->>Backend: Resolve 4.22.0 → image pullspec
-    Backend->>Backend: Store cluster with release.image
+    User->>CLI: gcphcp clusters create --version 4.22.0-ec.4
+    CLI->>Backend: POST /api/v1/clusters<br/>(release.version: "4.22.0-ec.4", channelGroup: "candidate")
+    Backend->>Backend: Validate version format against API schema pattern
+    Backend->>Backend: Store in spec (immutable)
     Backend-->>CLI: Cluster created
-    Backend->>Controller: Pub/Sub: cluster.created
-    Controller->>Backend: GET /api/v1/clusters/:id
-    Backend-->>Controller: Cluster spec (with release.image)
-    Controller->>HC: Create HostedCluster<br/>(spec.release.image from cluster spec)
-```
-
-### Upgrade Flow
-
-```mermaid
-sequenceDiagram
-    participant User
-    participant CLI as gcp-hcp CLI
-    participant Backend as CLS Backend
-    participant Cincinnati
-    participant Controller as CLS Controller
-    participant HC as HostedCluster
-
-    User->>CLI: gcphcp clusters upgrade <id> --version 4.22.1
-    CLI->>Backend: PUT /api/v1/clusters/:id<br/>(release.version: "4.22.1")
-    Backend->>Cincinnati: GET /graph?channel=stable-4.22&arch=amd64
-    Cincinnati-->>Backend: nodes[] with version + image
-    Backend->>Backend: Resolve 4.22.1 → image pullspec
-    Backend->>Backend: Update cluster, bump generation
-    Backend-->>CLI: Cluster updated
-    Backend->>Controller: Pub/Sub: cluster.updated
-    Controller->>Backend: GET /api/v1/clusters/:id
-    Backend-->>Controller: Updated spec (new release.image)
-    Controller->>HC: Update HostedCluster<br/>(spec.release.image)
-    HC->>HC: HyperShift Operator reconciles upgrade
+    Backend->>VRC: Pub/Sub: cluster.created
+    VRC->>Backend: GET /api/v1/clusters/:id
+    Backend-->>VRC: Cluster spec (release.version + channelGroup)
+    VRC->>Cincinnati: GET /graph?channel=candidate-4.22&arch=amd64
+    Cincinnati-->>VRC: nodes[] with version + payload
+    VRC->>VRC: Find exact match 4.22.0-ec.4 → image pullspec
+    VRC->>Backend: Report status condition (resolved image)
+    HCC->>Backend: GET /api/v1/clusters/:id
+    Backend-->>HCC: Cluster (spec + status with resolved image)
+    HCC->>HC: Create HostedCluster<br/>(spec.release.image from status condition)
 ```
 
 ---
 
 ## Implementation Tasks
 
-### Task 1: CLS Backend — Cincinnati Client
+### Task 1: CLS Backend — Add channelGroup and Version Pattern
 
 **Repo**: `cls-backend`
-**Files**: new `internal/services/versions_service.go`
+**Files**: `internal/models/cluster.go`, `docs/reference/openapi-spec.yaml`
 
 #### Changes Required
 
-Add a lightweight Cincinnati client that queries the graph endpoint and extracts version→image mappings.
+**1a. Add channelGroup to ReleaseSpec:**
+
+The `ReleaseSpec` already has `Image` and `Version` fields. Add `ChannelGroup`:
 
 ```go
-type CincinnatiVersion struct {
-    Version string `json:"version"`
-    Image   string `json:"image"`
+type ReleaseSpec struct {
+    Image        string `json:"image"`
+    Version      string `json:"version"`
+    ChannelGroup string `json:"channelGroup,omitempty"` // "stable", "fast", "candidate"
 }
+```
 
-type VersionsService struct {
+- `ChannelGroup` defaults to `"stable"` (same as ROSA CLI); persisted so upgrades use the same channel group
+
+**1b. Add version pattern to OpenAPI schema:**
+
+Add a pattern constraint to the existing `release.version` field:
+
+```yaml
+version:
+  type: string
+  pattern: "^4\\.22(\\..+)?$"
+  description: Target OCP version (e.g., "4.22" or "4.22.0-ec.4")
+```
+
+Accepts any 4.22.x version. Adding support for a new minor version (e.g., 4.23) means updating the pattern.
+
+**1c. Default channelGroup when not provided:**
+
+If `channelGroup` is not provided, default to `"stable"`.
+
+**1d. Validate that either version or image is provided:**
+
+Reject the request if both `release.version` and `release.image` are empty. At least one must be provided. This is also validated in the CLI, but the backend enforces it as a safety net.
+
+#### Verification
+
+- `POST /api/v1/clusters` with `release.version: "4.22.0-ec.4"` succeeds
+- `POST /api/v1/clusters` with `release.version: "4.21.3"` is rejected (unsupported minor version)
+- `channelGroup` defaults to `"stable"` when not provided
+
+---
+
+### Task 2: Version Resolution Controller (NEW)
+
+**Repo**: `cls-controller`
+**Files**: new Helm chart `deployments/helm-cls-version-resolution-controller/`
+
+#### Changes Required
+
+**2a. Create a new purpose-specific controller:**
+
+The version resolution controller:
+- Subscribes to cluster events via Pub/Sub
+- Reads `release.version` and `release.channelGroup` from the cluster spec
+- Queries Cincinnati to find the exact release image for that version
+- Reports the resolved image as a status condition back to the backend
+
+**2b. Cincinnati client:**
+
+```go
+type CincinnatiClient struct {
     baseURL string // https://api.openshift.com/api/upgrades_info/v1/graph
 }
 
-func (s *VersionsService) ListVersions(ctx context.Context, channel, arch string) ([]CincinnatiVersion, error) {
-    // GET {baseURL}?channel={channel}&arch={arch}
-    // Parse response: extract nodes[].version and nodes[].payload
-    // Sort by semver descending
-    // Return list
-}
+func (c *CincinnatiClient) ResolveVersion(ctx context.Context, version, channelGroup, arch string) (image string, err error) {
+    // Extract major.minor from full version to derive the Cincinnati channel
+    // e.g., version "4.22.0-ec.4" → "4.22", channelGroup "candidate" → channel "candidate-4.22"
+    parts := strings.SplitN(version, ".", 3)
+    channel := fmt.Sprintf("%s-%s.%s", channelGroup, parts[0], parts[1])
 
-func (s *VersionsService) ResolveVersion(ctx context.Context, version, channel, arch string) (string, error) {
-    // Call ListVersions
-    // Find matching version in nodes
-    // Return the image pullspec
+    // GET {baseURL}?channel={channel}&arch={arch}
+    // Parse response: find exact match for version in nodes[]
+    // Return the matching node's payload (image pullspec)
     // Error if version not found in channel
 }
 ```
@@ -100,8 +155,8 @@ func (s *VersionsService) ResolveVersion(ctx context.Context, version, channel, 
 ```json
 {
   "nodes": [
-    { "version": "4.22.0", "payload": "quay.io/openshift-release-dev/ocp-release@sha256:..." },
-    { "version": "4.22.1", "payload": "quay.io/openshift-release-dev/ocp-release@sha256:..." }
+    { "version": "4.22.0-ec.4", "payload": "quay.io/openshift-release-dev/ocp-release@sha256:..." },
+    { "version": "4.22.0-ec.3", "payload": "quay.io/openshift-release-dev/ocp-release@sha256:..." }
   ],
   "edges": [[0, 1]]
 }
@@ -109,171 +164,93 @@ func (s *VersionsService) ResolveVersion(ctx context.Context, version, channel, 
 
 Note: The image field in Cincinnati nodes is `payload`, not `image`.
 
-#### Verification
+**2c. Status condition reporting:**
 
-- Unit tests with mock HTTP responses covering: valid channel, empty channel, version not found
-- `go test ./internal/services/...`
+The controller reports the resolved image as a status condition:
 
----
-
-### Task 2: CLS Backend — Versions API Endpoint
-
-**Repo**: `cls-backend`
-**Files**: new `internal/handlers/versions_handler.go`, router registration
-
-#### Changes Required
-
-Expose `GET /api/v1/versions` that proxies to Cincinnati.
-
-**Request:**
-```
-GET /api/v1/versions?channel_group=stable&version=4.22&arch=amd64
+```go
+update := sdk.NewStatusUpdate(clusterID, "cls-version-resolution-controller", generation)
+update.SetMetadata("release.image", resolvedImage)
+update.SetMetadata("release.version", resolvedVersion)
+update.SetMetadata("release.channel", channel)
+update.SetAppliedTrue("VersionResolved", fmt.Sprintf("Resolved %s to %s", minorVersion, resolvedVersion))
+client.ReportStatus(update)
 ```
 
-- `channel_group` — optional, defaults to `stable` (e.g., `stable`, `fast`, `candidate`)
-- `version` — required, minor version (e.g., `4.22`)
-- `arch` — optional, defaults to `amd64`
+If resolution fails (e.g., Cincinnati unavailable, empty channel):
 
-The backend derives the Cincinnati channel from `channel_group` + `version` (e.g., `stable` + `4.22` → `stable-4.22`).
-
-**Response:**
-```json
-{
-  "channel_group": "stable",
-  "channel": "stable-4.22",
-  "arch": "amd64",
-  "versions": [
-    { "version": "4.22.0", "image": "quay.io/openshift-release-dev/ocp-release@sha256:abc..." },
-    { "version": "4.22.1", "image": "quay.io/openshift-release-dev/ocp-release@sha256:def..." }
-  ]
-}
+```go
+update.SetAppliedFalse("ResolutionFailed", fmt.Sprintf("Failed to resolve version %s in channel %s: %v", minorVersion, channel, err))
+client.ReportStatus(update)
 ```
 
-Register the route alongside existing cluster/nodepool routes.
+**2d. Preconditions:**
+
+The controller should only act when `release.version` is set in the cluster spec.
+
+**2e. ControllerConfig Helm chart:**
+
+Create a new Helm chart at `deployments/helm-cls-version-resolution-controller/` with:
+- ControllerConfig CR defining the controller name and preconditions
+- Pub/Sub subscription configuration
+- No resource templates (this controller only reports status, doesn't create k8s resources)
 
 #### Verification
 
-- Unit test for handler with mock service
-- Manual test: `curl http://localhost:8080/api/v1/versions?version=4.22`
+- Deploy the controller
+- Create a cluster with `release.version: "4.22.0-ec.4"` and `channelGroup: "candidate"`
+- Verify the controller reports a status condition with the resolved image
+- Verify the condition contains the correct image pullspec from Cincinnati
+- Test with an invalid version — verify the controller reports a failure condition
 
 ---
 
-### Task 3: CLS Backend — Version Resolution in Cluster Create/Update
-
-**Repo**: `cls-backend`
-**Files**: `internal/services/cluster_service.go`, `internal/models/cluster.go`
-
-#### Changes Required
-
-**3a. Extend ReleaseSpec model:**
-
-```go
-type ReleaseSpec struct {
-    Image        string `json:"image,omitempty"`
-    Version      string `json:"version,omitempty"`
-    ChannelGroup string `json:"channelGroup,omitempty"` // "stable", "fast", "candidate"
-}
-```
-
-- `ChannelGroup` defaults to `"stable"` (same as ROSA CLI); used only for resolution, not persisted separately
-
-**3b. Add resolution logic to CreateCluster and UpdateCluster:**
-
-```go
-func (s *ClusterService) resolveReleaseImage(ctx context.Context, release *ReleaseSpec) error {
-    if release.Image != "" {
-        return nil // explicit image provided, nothing to resolve
-    }
-    if release.Version == "" {
-        // Note: if neither image nor version is provided, the default version
-        // logic (3d) should run before this function is called.
-        return fmt.Errorf("either release.image or release.version is required")
-    }
-
-    // Derive Cincinnati channel from channel group + version (same pattern as ROSA CLI)
-    // e.g., channelGroup "stable" + version "4.22.0" → channel "stable-4.22"
-    channelGroup := release.ChannelGroup
-    if channelGroup == "" {
-        channelGroup = "stable" // default, same as ROSA CLI
-    }
-    parts := strings.Split(release.Version, ".")
-    if len(parts) < 2 {
-        return fmt.Errorf("invalid version format: %s", release.Version)
-    }
-    channel := fmt.Sprintf("%s-%s.%s", channelGroup, parts[0], parts[1])
-    // Note: if stable channel is empty (e.g., pre-GA), the resolution will
-    // fail and the user must explicitly pass --channel-group candidate
-
-    image, err := s.versionsService.ResolveVersion(ctx, release.Version, channel, "amd64")
-    if err != nil {
-        return fmt.Errorf("failed to resolve version %s in channel %s: %w", release.Version, channel, err)
-    }
-
-    release.Image = image
-    return nil
-}
-```
-
-Call `resolveReleaseImage()` in both `CreateCluster()` and `UpdateCluster()` before persisting.
-
-**3c. Validate upgrade path against Cincinnati edges:**
-
-When updating a cluster's release, verify that Cincinnati has a direct edge from the current version to the requested version. The edges are already available in the graph response used for version resolution.
-
-```go
-func (s *VersionsService) ValidateUpgradePath(ctx context.Context, currentVersion, requestedVersion, channel, arch string) error {
-    graph, err := s.fetchGraph(ctx, channel, arch)
-    if err != nil {
-        return fmt.Errorf("failed to fetch Cincinnati graph: %w", err)
-    }
-
-    // Find node indices for current and requested versions
-    fromIdx, toIdx := -1, -1
-    for i, node := range graph.Nodes {
-        if node.Version == currentVersion { fromIdx = i }
-        if node.Version == requestedVersion { toIdx = i }
-    }
-    if fromIdx == -1 {
-        return fmt.Errorf("current version %s not found in channel %s", currentVersion, channel)
-    }
-    if toIdx == -1 {
-        return fmt.Errorf("requested version %s not found in channel %s", requestedVersion, channel)
-    }
-
-    // Check for a direct edge
-    for _, edge := range graph.Edges {
-        if edge[0] == fromIdx && edge[1] == toIdx {
-            return nil // valid upgrade path
-        }
-    }
-    return fmt.Errorf("no upgrade path from %s to %s in channel %s", currentVersion, requestedVersion, channel)
-}
-```
-
-**3d. Default version when none provided:**
-
-When neither `release.image` nor `release.version` is provided, the backend should default to the latest available version for 4.22 (or the current minimum supported minor). The backend falls back through channel groups in order: `stable` → `fast` → `candidate`, picking the latest version from the first non-empty channel. This ensures a default is always available (e.g., pre-GA when only `candidate` has content) and keeps existing e2e tests working without changes.
-
-**3e. Default nodepool release image to cluster's release image:**
-
-When creating a nodepool, if `release.image` is not provided, the backend should look up the parent cluster's `release.image` and use that as the default.
-
-#### Verification
-
-- Unit tests: version-only creation, image-only creation, both provided, neither provided
-- Unit tests: channel derivation from version string
-- Integration test: create cluster with `release.version: "4.22.0"`, verify stored spec has resolved `release.image`
-
----
-
-### Task 4: CLS Controller — Dynamic Release Image in HostedCluster Template
+### Task 3: HC Templating Controller — Read Resolved Image from Status
 
 **Repo**: `cls-controller`
-**File**: `deployments/helm-cls-hypershift-client/templates/controllerconfig.yaml`
+**Files**:
+- `internal/template/engine.go` — expose cluster status in template context
+- `deployments/helm-cls-hypershift-client/templates/controllerconfig.yaml` — template change
+- `deployments/helm-cls-nodepool-controller/templates/controllerconfig.yaml` — template change
 
 #### Changes Required
 
-Replace the hardcoded release image with the cluster spec value.
+**3a. Expose cluster status in template context:**
+
+The `buildClusterContext` function currently only exposes `.cluster.spec`. Add `.cluster.status`:
+
+```go
+func (e *Engine) buildClusterContext(cluster *sdk.Cluster) map[string]interface{} {
+    clusterCtx := map[string]interface{}{
+        "id":         cluster.ID,
+        "name":       cluster.Name,
+        "generation": cluster.Generation,
+        "created_by": cluster.CreatedBy,
+    }
+
+    var spec map[string]interface{}
+    if err := json.Unmarshal(cluster.Spec, &spec); err == nil {
+        clusterCtx["spec"] = spec
+    }
+
+    // Expose status for template rendering (e.g., resolved release image)
+    if cluster.Status != nil {
+        statusBytes, err := json.Marshal(cluster.Status)
+        if err == nil {
+            var status map[string]interface{}
+            if err := json.Unmarshal(statusBytes, &status); err == nil {
+                clusterCtx["status"] = status
+            }
+        }
+    }
+
+    return clusterCtx
+}
+```
+
+**3b. Add precondition:** The HC templating controller should wait for the version resolution controller to report a successful condition before templating the HostedCluster.
+
+**3c. Update HostedCluster template to read from status:**
 
 ```yaml
 # Before:
@@ -284,26 +261,12 @@ spec:
 # After:
 spec:
   release:
-    image: {{ `{{ .cluster.spec.release.image }}` }}
+    image: {{ `{{ (index .cluster.status.controller_statuses "cls-version-resolution-controller").metadata.release_image }}` }}
 ```
 
-#### Verification
+Note: The exact template path depends on how the controller status metadata is exposed. This may need adjustment based on the actual status structure.
 
-- Deploy controller with updated Helm chart
-- Create a cluster via backend with `release.version: "4.22.0"`
-- Verify the HostedCluster is created with the resolved image, not the old hardcoded one
-- Verify `oc get hostedcluster -o jsonpath='{.spec.release.image}'` matches the Cincinnati pullspec
-
----
-
-### Task 5: CLS Controller — Dynamic Release Image in NodePool Template
-
-**Repo**: `cls-controller`
-**File**: `deployments/helm-cls-nodepool-controller/templates/controllerconfig.yaml`
-
-#### Changes Required
-
-Update the NodePool template to use the nodepool spec's release image.
+**3d. Update NodePool template similarly:**
 
 ```yaml
 # Before:
@@ -312,84 +275,39 @@ release:
 
 # After:
 release:
-  image: {{ `{{ .nodepool.spec.release.image }}` }}
+  image: {{ `{{ (index .cluster.status.controller_statuses "cls-version-resolution-controller").metadata.release_image }}` }}
 ```
-
-**Note**: The nodepool spec should always have `release.image` set by the backend. If the CLI doesn't provide one, the backend should default to the cluster's release image.
 
 #### Verification
 
-- Create a nodepool without specifying a release image
-- Verify the NodePool CR uses the image from the nodepool spec (set by backend)
+- Deploy updated controller
+- Create a cluster with `release.version: "4.22.0-ec.4"`
+- Verify the HostedCluster is created with the image resolved by the version resolution controller
+- Verify `oc get hostedcluster -o jsonpath='{.spec.release.image}'` matches the Cincinnati pullspec
 
 ---
 
-### Task 6: CLI — Version Listing Command
-
-**Repo**: `gcp-hcp-cli`
-**Files**: `src/gcphcp/cli/commands/clusters.py`, `src/gcphcp/client/api_client.py`
-
-#### Changes Required
-
-**6a. Add API client method:**
-
-```python
-def list_versions(self, version, channel_group="stable", arch="amd64"):
-    """List available OCP versions for a channel group and minor version."""
-    params = {"version": version, "channel_group": channel_group, "arch": arch}
-    return self._get("/api/v1/versions", params=params)
-```
-
-**6b. Add `versions` subcommand:**
-
-```bash
-gcphcp clusters versions --version 4.22
-gcphcp clusters versions --version 4.22 --channel-group candidate
-```
-
-Output format:
-```
-Available versions in stable-4.22 (amd64):
-
-  VERSION    IMAGE
-  4.22.1     quay.io/openshift-release-dev/ocp-release@sha256:abc...
-  4.22.0     quay.io/openshift-release-dev/ocp-release@sha256:def...
-  ...
-```
-
-Flags:
-- `--version` — required, minor version (e.g., `4.22`)
-- `--channel-group` — optional, defaults to `stable`
-- `--arch` — optional, defaults to `amd64`
-
-#### Verification
-
-- `gcphcp clusters versions --version 4.22` returns a sorted version list (from stable)
-- `gcphcp clusters versions --version 4.22 --channel-group candidate` returns candidate versions
-
----
-
-### Task 7: CLI — Version Flag on Cluster Create
+### Task 4: CLI — Version Flag on Cluster Create
 
 **Repo**: `gcp-hcp-cli`
 **File**: `src/gcphcp/cli/commands/clusters.py`
 
 #### Changes Required
 
-Add `--version`, `--channel-group`, and `--release-image` flags to `clusters create`.
+Add `--version` and `--channel-group` flags to `clusters create`.
 
 ```bash
-# Create with version (defaults to stable channel group, same as ROSA)
+# Create with version (defaults to stable channel group)
 gcphcp clusters create my-cluster --project my-project --version 4.22.0
 
 # Create with version from a specific channel group
-gcphcp clusters create my-cluster --project my-project --version 4.22.0 --channel-group candidate
+gcphcp clusters create my-cluster --project my-project --version 4.22.0-ec.4 --channel-group candidate
 
 # Create with explicit image (backward compatible)
 gcphcp clusters create my-cluster --project my-project --release-image quay.io/...
 ```
 
-Update `_build_cluster_spec()` to include the release fields:
+Update `_build_cluster_spec()` to include the version fields:
 
 ```python
 if version:
@@ -400,109 +318,65 @@ elif release_image:
     cluster_data["spec"]["release"] = {"image": release_image}
 ```
 
-Flags are mutually exclusive: `--version` and `--release-image` cannot both be specified.
+Flags are mutually exclusive (`--version` and `--release-image` cannot both be specified) and at least one is required.
 
 #### Verification
 
-- `gcphcp clusters create --version 4.22.0` creates cluster with resolved image
-- `gcphcp clusters create --release-image quay.io/...` still works
-- `gcphcp clusters create --version X --release-image Y` returns validation error
-
----
-
-### Task 8: CLI — Upgrade Commands (Cluster and NodePool)
-
-**Repo**: `gcp-hcp-cli`
-**Files**: `src/gcphcp/cli/commands/clusters.py`, `src/gcphcp/cli/commands/nodepools.py`
-
-#### Changes Required
-
-Add separate upgrade subcommands for clusters and nodepools, following the ROSA CLI pattern:
-
-**Cluster upgrade** (control plane only):
-```bash
-gcphcp clusters upgrade <cluster-id> --version 4.22.1
-```
-
-**NodePool upgrade** (worker nodes):
-```bash
-gcphcp nodepools upgrade <nodepool-id> --version 4.22.1
-```
-
-Both commands call their respective `PUT` endpoints with updated release spec:
-
-```python
-def upgrade_resource(self, resource_type, resource_id, version=None, release_image=None):
-    release = {}
-    if version:
-        release["version"] = version
-    elif release_image:
-        release["image"] = release_image
-
-    payload = {"spec": {"release": release}}
-    return self._put(f"/api/v1/{resource_type}/{resource_id}", json=payload)
-```
-
-**Key design points**:
-- Cluster and nodepool upgrades are independent operations (same as ROSA and HyperShift)
-- At creation time, nodepools default to the cluster's release image (Task 3e)
-- The backend validates upgrade paths for both clusters and nodepools (Task 3c)
-
-#### Verification
-
-- `gcphcp clusters upgrade <id> --version 4.22.1` upgrades the control plane
-- `gcphcp nodepools upgrade <id> --version 4.22.1` upgrades the nodepool
-- Upgrading a nodepool to a version higher than the cluster's version is rejected
+- `gcphcp clusters create --version 4.22.0-ec.4` creates cluster with version in spec
+- `gcphcp clusters create --release-image quay.io/...` still works (backward compatible)
+- `gcphcp clusters create --version 4.22.0-ec.4 --release-image Y` returns validation error
+- `gcphcp clusters create` with neither `--version` nor `--release-image` returns validation error
 
 ---
 
 ## Stories
 
-The implementation tasks above map to 3 stories, one per layer:
+The implementation tasks above map to 3 stories:
 
-### Story 1: CLS Backend — Cincinnati Integration and Version Resolution
+### Story 1: CLS Backend — channelGroup and Version Pattern
 
 **Repo**: `cls-backend`
-**Tasks**: 1 (Cincinnati client), 2 (Versions endpoint), 3 (Version resolution + nodepool default)
-**Story Points**: 3 — Straightforward work with multiple small pieces (HTTP client, endpoint, resolution, edge validation, defaults). No design needed — just execution. Minor risk around Cincinnati API behavior.
+**Tasks**: 1 (Add channelGroup field and version pattern to API schema)
+**Story Points**: 1 — Add one field to ReleaseSpec and a version pattern to the API schema. Simple, low risk.
 
 **Acceptance Criteria**:
-- [ ] `GET /api/v1/versions?version=4.22&channel_group=candidate` returns available versions from Cincinnati
-- [ ] `POST /api/v1/clusters` with `release.version` resolves the image from Cincinnati and stores it
-- [ ] `POST /api/v1/clusters` with `release.image` uses the image directly (backward compatible)
-- [ ] `PUT /api/v1/clusters/:id` with updated `release.version` validates the upgrade path against Cincinnati edges and resolves the new image
-- [ ] Nodepool creation defaults `release.image` to the parent cluster's release image when not provided
+- [ ] `POST /api/v1/clusters` with `release.version: "4.22.0-ec.4"` stores version and channel group in spec
+- [ ] `POST /api/v1/clusters` with unsupported version (e.g., `4.21.3`) is rejected by API schema pattern
+- [ ] `channelGroup` defaults to `"stable"` when not provided
 
-### Story 2: CLS Controller — Dynamic Release Image Templates
+### Story 2: CLS Controller — Version Resolution Controller and Template Updates
 
 **Repo**: `cls-controller`
-**Tasks**: 4 (HostedCluster template), 5 (NodePool template)
-**Story Points**: 1 — Template-only changes. The controller's template engine already unmarshals `cluster.Spec` JSON and exposes it as `.cluster.spec` (see `buildClusterContext` in `internal/template/engine.go:306`). No Go code changes needed.
+**Tasks**: 2 (Version resolution controller), 3 (HC templating controller updates)
+**Story Points**: 3 — New controller using existing CLS controller framework (Pub/Sub, status reporting, Helm chart structure). Cincinnati client is a simple HTTP GET + JSON parse. Go code change to expose status in templates is minimal.
 
 **Acceptance Criteria**:
-- [ ] HostedCluster is created with `spec.release.image` from the cluster spec (not hardcoded)
-- [ ] NodePool is created with `release.image` from the nodepool spec (not hardcoded)
-- [ ] HostedCluster `spec.release.image` is updated when the cluster spec changes (upgrade flow)
+- [ ] Version resolution controller resolves `release.version` to a release image via Cincinnati and reports it as a status condition
+- [ ] HC templating controller reads the resolved image from the status condition (not hardcoded)
+- [ ] HostedCluster is created with the correct release image from Cincinnati
+- [ ] NodePool is created with the correct release image
+- [ ] Resolution failure is reported as a failed condition (not a silent failure)
 
-### Story 3: CLI — Version Selection, Listing, and Upgrade Commands
+### Story 3: CLI — Version Selection Flag
 
 **Repo**: `gcp-hcp-cli`
-**Tasks**: 6 (Versions command), 7 (Create --version flag), 8 (Upgrade command)
-**Story Points**: 3 — Three new subcommands/flags, all straightforward. The CLI passes parameters to the backend; no complex logic. Some effort for wiring and flag handling.
+**Tasks**: 4 (Version flag on cluster create)
+**Story Points**: 2 — Add `--version` and `--channel-group` flags, straightforward wiring to backend.
 
 **Acceptance Criteria**:
-- [ ] `gcphcp clusters versions --version 4.22 --channel-group candidate` lists available versions
-- [ ] `gcphcp clusters create --version 4.22.0` creates a cluster with the resolved image
+- [ ] `gcphcp clusters create --version 4.22.0-ec.4 --channel-group candidate` creates a cluster with the version in spec
+- [ ] `gcphcp clusters create --version 4.22.0` uses the default channel group (`stable`)
 - [ ] `gcphcp clusters create --release-image quay.io/...` still works (backward compatible)
-- [ ] `gcphcp clusters upgrade <id> --version 4.22.1` upgrades the control plane
-- [ ] `gcphcp nodepools upgrade <id> --version 4.22.1` upgrades the nodepool
+- [ ] `--version` and `--release-image` are mutually exclusive
 
 ### Implementation Order
 
 | Step | Story | Points | Dependencies |
 |------|-------|--------|-------------|
-| 1 | Story 1: Backend | 3 | None |
-| 2 | Story 2: Controller | 1 | Story 1 |
-| 3 | Story 3: CLI | 3 | Story 2 |
+| 1 | Story 1: Backend | 1 | None |
+| 2 | Story 2: Controller | 3 | Story 1 |
+| 3 | Story 3: CLI | 2 | Story 1 |
 
-**Total: 7 story points**
+**Total: 6 story points**
+
+Stories 2 and 3 depend on Story 1 but can be worked in parallel after Story 1 is complete.
