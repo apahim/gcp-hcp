@@ -1,6 +1,6 @@
 # GCP HCP
 
-Documentation, design decisions, and experiments for Hypershift on GCP managed service
+Documentation, design decisions, and experiments for Hypershift on GCP managed service.
 
 ## Repository Structure
 
