@@ -20,8 +20,8 @@ Adopt Zero Operator Access as the architectural principle governing how operator
   - **AI agent evolution**: The platform's agent autonomy framework introduces non-human operators that require the same access controls as humans
 
 - **Assumptions**:
-  - Cloud Workflows with `gke.request` connector provides sufficient Kubernetes API coverage for all operational tasks, eliminating the need for direct cluster access
-  - PAM approval latency is acceptable for all operational scenarios, including incident response
+  - Cloud Workflows with `gke.request` connector provides sufficient Kubernetes API coverage for currently supported operational tasks, minimizing the need for direct cluster access
+  - PAM approval latency is acceptable for planned and most incident-response scenarios, with acknowledged risk during high-severity incidents
   - The credential chain gap (Layer 1) can be architecturally resolved in a future phase through mechanisms such as credential elimination, out-of-band delivery, or customer-managed encryption
   - GitOps automation service accounts operate under sufficient existing controls (Workload Identity, least privilege, code review) that they do not require the same approval gates as human/AI operators
 
