@@ -98,7 +98,7 @@ The decomposition logic depends on the parent issue type.
 #### If Parent is Epic: Create Stories
 
 1. Extract the epic's scope (what's included, what's not)
-2. Identify the components/repositories involved (using the canonical Component-to-Repo Mapping in `gcp-hcp-architecture` skill). Valid components: hypershift, gcp-hcp-infra, cls-backend, cls-controller, gcp-hcp-cli, gcp-hcp.
+2. Identify the components/repositories involved (using the canonical Component-to-Repo Mapping in `gcp-hcp-architecture` skill). Valid components: hypershift, cls-backend, cls-controller, gcp-hcp-cli, gcp-hcp.
 3. Identify natural vertical slices or technical layers for splitting
 4. Apply splitting criteria from the story template:
    - More than 5 acceptance criteria -> split
@@ -143,7 +143,7 @@ Before creating child issues, validate the decomposition.
 | Dependencies between Stories are correctly identified | Add missing dependency links |
 | Total decomposition covers the full Epic scope (nothing orphaned) | Add Stories for uncovered scope |
 | Every Story is 1-5 points | Split 8+ into smaller Stories |
-| Every Story has exactly one `components` value matching the canonical Component-to-Repo Mapping in `gcp-hcp-architecture` skill | Fix component name to match a valid entry (hypershift, gcp-hcp-infra, cls-backend, cls-controller, gcp-hcp-cli, gcp-hcp) |
+| Every Story has exactly one `components` value matching the canonical Component-to-Repo Mapping in `gcp-hcp-architecture` skill | Fix component name to match a valid entry (hypershift, cls-backend, cls-controller, gcp-hcp-cli, gcp-hcp) |
 | Stories spanning multiple repos are split into one Story per component | Split multi-component Stories |
 | Jira wiki markup is correct (`h2.` not `##`, `*` not `-`) | Fix markup |
 

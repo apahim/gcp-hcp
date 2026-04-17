@@ -76,7 +76,6 @@ Canonical mapping used by Planning and Implementation Agents to route Stories to
 | Component | GitHub URL | Language | Verify | Test |
 |-----------|------------|----------|--------|------|
 | hypershift | `https://github.com/openshift/hypershift` | Go | `make verify` | `make test` |
-| gcp-hcp-infra | `https://github.com/apahim/gcp-hcp-infra` | Terraform | `terraform validate` | `terraform fmt -check` |
 | cls-backend | `https://github.com/apahim/cls-backend` | Go | `go build ./...` | `go test ./...` |
 | cls-controller | `https://github.com/apahim/cls-controller` | Go | `go build ./...` | `go test ./...` |
 | gcp-hcp-cli | `https://github.com/apahim/gcp-hcp-cli` | Python | `ruff check` | `python -m pytest` |
