@@ -16,7 +16,7 @@ Implement Jira Stories by cloning the target repository, generating code that sa
 |---|---|
 | **Purpose** | Generate code implementing a Jira Story, create PR in the target repo |
 | **Trigger label** | `agent:implement` |
-| **Preconditions** | Issue type is Story. Has acceptance criteria in description. Has `component` field identifying target repo. |
+| **Preconditions** | Issue type is Story. Has acceptance criteria in description. Has `component` field identifying target repo. Has `agent:plan:done` label (approved implementation plan). |
 | **Precondition check** | If preconditions not met: add comment explaining what's missing, swap label to `agent:implement:blocked` |
 | **Inputs** | Story key, target repo (from component field), story description (AC, technical approach, requirements), `gcp-hcp-architecture` skill for cross-repo context, design decisions |
 | **Outputs** | Feature branch + PR in target repo. PR body links back to Jira story. Comment on story with PR URL. |
@@ -51,7 +51,8 @@ Use `curl -G --data-urlencode` with Basic auth. Take the first result. If no res
    - Issue type is Story
    - Description has acceptance criteria (contains at least one section with "Acceptance Criteria" or "AC" header, or contains `- [ ]` checklist items)
    - `components` field is non-empty and maps to a known repo (see Component-to-Repo Mapping below)
-5. If any precondition fails: post comment explaining what's missing, swap label to `agent:implement:blocked`, exit
+   - Issue has an `agent:plan:done` label (confirms a plan was created and reviewed)
+5. If any precondition fails: post comment explaining what's missing, swap label to `agent:implement:blocked`, exit. For missing `agent:plan:done` label, comment: "No approved implementation plan found. Apply `agent:plan` first and merge the plan PR before applying `agent:implement`."
 
 ### Phase 3: Clone Target Repo
 
@@ -75,7 +76,7 @@ Verify `gh auth status` works. If not, swap to `agent:implement:failed`.
 
 Read from the `gcp-hcp` repo (sibling directory in ambient sessions, current repo locally):
 
-- `implementation-plans/` -- check for `<STORY_KEY>*` matching the current story. If a plan file exists, use it as the primary implementation guide (it contains file paths, code snippets, task ordering, and verification steps written by the Planning Agent). Skip broader pattern discovery when a plan is available.
+- `implementation-plans/` -- find `<STORY_KEY>*` matching the current story. The plan file is **required** -- it contains file paths, code snippets, task ordering, and verification steps written by the Planning Agent. Use it as the primary implementation guide and skip broader pattern discovery. If no matching plan file is found, swap to `agent:implement:blocked` with comment: "Implementation plan file not found in `implementation-plans/`. Ensure the plan PR from the Planning Agent has been merged."
 - `claude-plugin/gcp-hcp/skills/gcp-hcp-architecture/SKILL.md` -- cross-repo map, architectural invariants
 - `design-decisions/` -- scan for decisions relevant to the story's domain (use the topic index to identify relevant topics)
 - `docs/definition-of-done.md` -- quality criteria informing implementation quality
@@ -216,22 +217,15 @@ h2. Next Steps
 
 ## Component-to-Repo Mapping
 
-| Component | Repository | GitHub URL | Language | Verify | Test |
-|-----------|-----------|------------|----------|--------|------|
-| hypershift | hypershift | `https://github.com/openshift/hypershift` | Go | `make verify` | `make test` |
-| gcp-hcp-infra | gcp-hcp-infra | `https://github.com/apahim/gcp-hcp-infra` | Terraform | `terraform validate` | `terraform fmt -check` |
-| cls-backend | cls-backend | `https://github.com/apahim/cls-backend` | Go | `go build ./...` | `go test ./...` |
-| cls-controller | cls-controller | `https://github.com/apahim/cls-controller` | Go | `go build ./...` | `go test ./...` |
-| gcp-hcp-cli | gcp-hcp-cli | `https://github.com/apahim/gcp-hcp-cli` | Python | `ruff check` | `python -m pytest` |
-| gcp-hcp | gcp-hcp | `https://github.com/openshift-online/gcp-hcp` | Docs/Config | N/A | N/A |
+Use the canonical **Component-to-Repo Mapping** table in `claude-plugin/gcp-hcp/skills/gcp-hcp-architecture/SKILL.md` (under "Cross-Repo Map > Component-to-Repo Mapping (Agent Reference)"). That table is the single source of truth for component names, GitHub URLs, languages, and verify/test commands.
 
-If the component does not match any entry, swap to `agent:implement:blocked` with a comment listing the valid component names.
+If the component does not match any entry in that table, swap to `agent:implement:blocked` with a comment listing the valid component names.
 
 ## Jira Integration
 
 ### API Operations (curl-based)
 
-All Jira operations use direct REST API calls via `curl` with Basic authentication. MCP servers are not yet available in ACP scheduled sessions.
+All Jira operations use direct REST API calls via `curl` with Basic authentication. MCP servers are not yet available in ACP scheduled sessions. **TODO**: Converge to MCP tools (consistent with Spec and Planning Agents) once MCP is available in ACP. Requires `$JIRA_USERNAME` and `$JIRA_PERSONAL_TOKEN` environment variables.
 
 | Operation | Endpoint | Method | Used In |
 |-----------|----------|--------|---------|
@@ -354,6 +348,8 @@ Still perform all validation, verification, self-review, and error-handling step
 ## Provisional Design Note
 
 The label-based activation pattern (`agent:implement` -> `agent:implement:done`) used by this agent has not yet been formalized in a design decision. It is being validated through this MVP deployment alongside the Spec Agent. A formal ADR will be created after the pattern is proven in production.
+
+**Planning Agent dependency**: This agent requires the Planning Agent to have run first. If `agent:plan:done` label is missing or no plan file exists in `implementation-plans/`, the agent blocks with `agent:implement:blocked`. Deploy and enable the Planning Agent before the Implementation Agent.
 
 ## Domain Context
 

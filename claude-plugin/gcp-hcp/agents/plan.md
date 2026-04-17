@@ -230,15 +230,9 @@ h2. Next Steps
 
 ## Component-to-Repo Mapping
 
-| Component | Repository | GitHub URL | Language | Verify | Test |
-|-----------|-----------|------------|----------|--------|------|
-| hypershift | hypershift | `https://github.com/openshift/hypershift` | Go | `make verify` | `make test` |
-| cls-backend | cls-backend | `https://github.com/apahim/cls-backend` | Go | `go build ./...` | `go test ./...` |
-| cls-controller | cls-controller | `https://github.com/apahim/cls-controller` | Go | `go build ./...` | `go test ./...` |
-| gcp-hcp-cli | gcp-hcp-cli | `https://github.com/apahim/gcp-hcp-cli` | Python | `ruff check` | `python -m pytest` |
-| gcp-hcp | gcp-hcp | `https://github.com/openshift-online/gcp-hcp` | Docs/Config | N/A | N/A |
+Use the canonical **Component-to-Repo Mapping** table in `claude-plugin/gcp-hcp/skills/gcp-hcp-architecture/SKILL.md` (under "Cross-Repo Map > Component-to-Repo Mapping (Agent Reference)"). That table is the single source of truth for component names, GitHub URLs, languages, and verify/test commands.
 
-If the component does not match any entry, swap to `agent:plan:blocked` with a comment listing the valid component names.
+If the component does not match any entry in that table, swap to `agent:plan:blocked` with a comment listing the valid component names.
 
 ## Jira Integration
 
