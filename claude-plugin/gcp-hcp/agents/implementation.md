@@ -62,8 +62,9 @@ STORY_KEY="GCP-XXX"
 SHORT_DESC="$(echo "${STORY_SUMMARY}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | cut -c1-40)"
 BRANCH_NAME="agent/${STORY_KEY}-${SHORT_DESC}"
 
-git clone --depth 1 "${TARGET_REPO_URL}" /tmp/target-repo
-cd /tmp/target-repo
+REPO_DIR="$(mktemp -d)"
+git clone --depth 1 "${TARGET_REPO_URL}" "${REPO_DIR}"
+cd "${REPO_DIR}"
 git checkout -b "${BRANCH_NAME}"
 ```
 
@@ -74,6 +75,7 @@ Verify `gh auth status` works. If not, swap to `agent:implement:failed`.
 
 Read from the `gcp-hcp` repo (sibling directory in ambient sessions, current repo locally):
 
+- `implementation-plans/` -- check for `<STORY_KEY>*` matching the current story. If a plan file exists, use it as the primary implementation guide (it contains file paths, code snippets, task ordering, and verification steps written by the Planning Agent). Skip broader pattern discovery when a plan is available.
 - `claude-plugin/gcp-hcp/skills/gcp-hcp-architecture/SKILL.md` -- cross-repo map, architectural invariants
 - `design-decisions/` -- scan for decisions relevant to the story's domain (use the topic index to identify relevant topics)
 - `docs/definition-of-done.md` -- quality criteria informing implementation quality
@@ -82,7 +84,7 @@ Read from the target repo (cloned in Phase 3):
 
 - `CLAUDE.md` or `AGENTS.md` if present -- repo-specific conventions
 - `README.md` -- project structure, build instructions, contribution guidelines
-- Search for similar existing implementations using `grep` / `find` (pattern discovery)
+- Search for similar existing implementations using `grep` / `find` (pattern discovery -- can be lighter when a plan file is available)
 
 ### Phase 5: Implement
 
@@ -93,7 +95,7 @@ Read from the target repo (cloned in Phase 3):
 5. **Stage and commit**: Use conventional commit format
 
 ```bash
-cd /tmp/target-repo
+cd "${REPO_DIR}"
 git add <changed-files>
 git commit -m "$(cat <<'EOF'
 feat(gcp): <short description>
@@ -144,7 +146,7 @@ If issues found, fix them and re-run verification. Note: "Self-review: Fixed [is
 ### Phase 8: Create PR
 
 ```bash
-cd /tmp/target-repo
+cd "${REPO_DIR}"
 git push -u origin "${BRANCH_NAME}"
 
 gh pr create \
@@ -229,7 +231,7 @@ If the component does not match any entry, swap to `agent:implement:blocked` wit
 
 ### API Operations (curl-based)
 
-All Jira operations use direct REST API calls via `curl` with Basic authentication. MCP servers are not available in ACP scheduled sessions.
+All Jira operations use direct REST API calls via `curl` with Basic authentication. MCP servers are not yet available in ACP scheduled sessions.
 
 | Operation | Endpoint | Method | Used In |
 |-----------|----------|--------|---------|
@@ -259,9 +261,9 @@ curl -s -u "$JIRA_USERNAME:$JIRA_PERSONAL_TOKEN" \
 
 | Field | ID | Type | Notes |
 |-------|----|------|-------|
-| Story Points | `customfield_10028` | float | Read-only for impl agent (set by spec agent) |
-| Epic Link | `customfield_10014` | string | Read-only (parent epic key) |
-| Epic Name | `customfield_10011` | string | Not used by impl agent |
+| Story Points | `customfield_12310243` | float | Read-only for impl agent (set by spec agent) |
+| Epic Link | `customfield_12311140` | string | Read-only (parent epic key) |
+| Epic Name | `customfield_12311141` | string | Not used by impl agent |
 
 ### Wiki Markup Conventions
 
@@ -347,7 +349,7 @@ When invoked via `/gcp-hcp:implement GCP-XXX`, process the specified issue inter
 7. **Show the implementation and ask for confirmation** using `AskUserQuestion` before creating PR
 8. Execute Phases 8-9 (Create PR, Update Jira)
 
-Still perform all validation, verification, self-review, and error handling steps.
+Still perform all validation, verification, self-review, and error-handling steps.
 
 ## Provisional Design Note
 

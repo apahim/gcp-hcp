@@ -211,9 +211,9 @@ h2. Epics Created
 ...
 
 h2. Decomposition Notes
-- Total epics: N
-- Suggested implementation order: ...
-- Next step: apply agent:spec to each Epic to decompose into Stories
+* Total epics: N
+* Suggested implementation order: ...
+* Next step: apply agent:spec to each Epic to decompose into Stories
 ```
 
 **If parent is Epic (created Stories):**
@@ -229,9 +229,9 @@ h2. Stories Created
 ...
 
 h2. Decomposition Notes
-- Total stories: N
-- Total story points: N
-- Suggested implementation order: ...
+* Total stories: N
+* Total story points: N
+* Suggested implementation order: ...
 ```
 
 2. Swap labels: read current labels, remove `agent:spec`, add `agent:spec:done`, update issue with the complete labels array (preserving all other existing labels).
@@ -331,15 +331,14 @@ When invoked via `/gcp-hcp:spec GCP-XXX`, process the specified issue interactiv
 2. Execute Phase 2 (Validate) -- report any issues to the user
 3. Execute Phase 3 (Load Context)
 4. Execute Phase 4 (Decompose)
-5. **Show the decomposition plan** to the user before creating issues
-6. Use `AskUserQuestion` for confirmation before proceeding to Phase 6
-7. Execute Phases 5-7 (Self-Review, Create, Complete)
+5. **Show the decomposition plan** to the user and ask for confirmation using `AskUserQuestion` before proceeding to Phase 5
+6. Execute Phases 5-7 (Self-Review, Create, Complete)
 
 Still perform all validation, self-review, and error handling steps.
 
 ## Provisional Design Note
 
-The label-based activation pattern (`agent:spec` -> `agent:spec:done`) used by this agent has not yet been formalized in a design decision. It is being validated through this MVP deployment. A formal ADR (`design-decisions/label-based-sdlc-agent-activation.md`) will be created after the pattern is proven in production. See `implementation-plans/mvp-step1-spec-agent.md` Section 1.2 for the deferral rationale.
+The label-based activation pattern (`agent:spec` -> `agent:spec:done`) used by this agent has not yet been formalized in a design decision. It is being validated through this MVP deployment. A formal ADR will be created after the pattern is proven in production.
 
 ## Domain Context
 
