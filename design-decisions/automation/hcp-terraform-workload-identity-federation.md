@@ -213,11 +213,13 @@ The PagerDuty workspace uses a PagerDuty API key — no GCP IAM needed. It does 
 
 ## Open Items
 
+### Resolved
+
+- **Access project creation and bootstrap credentials**: The access project and WIF resources are bootstrapped locally following the same pattern as environment setup ([gcp-hcp-infra SETUP.md](https://github.com/openshift-online/gcp-hcp-infra/blob/main/terraform/config/global/SETUP.md)). An operator runs `terraform apply` locally with their own `gcloud` credentials and a `TFE_TOKEN` to create the access GCP project, WIF pool, SAs, and TFC variable set in a single apply. State is then migrated to TFC (the access workspace takes over ongoing management). No static service account keys are needed. The operator needs folder-admin permissions (to create the project), `iam.workloadIdentityPoolAdmin` + `iam.serviceAccountAdmin` (for WIF resources), and a TFC API token (for variable set creation).
+- **Circular dependency**: The local bootstrap sidesteps the circular dependency entirely — the first apply runs locally, not in a TFC workspace, so there is no workspace for `apply_to_all_workspaces` to poison. After state is migrated to TFC, the access workspace inherits its own variable set, but at that point the SAs already exist and the credentials are valid. If a future `terraform apply` on the access workspace partially fails (e.g., SA recreation), the same manual detach-and-reapply fix from the [experiment](../experiments/terraform-automation-tools/hcp-terraform-wif-playground.md) applies.
+
 ### Implementation-Critical
 
-- **Access project creation**: Who creates the `gcp-hcp-tfc-access-{env}` GCP projects and how? Options include manual creation via GCP console, Atlantis-managed creation via existing folder-level project creation permissions, or bootstrapping through a separate process.
-- **Access workspace bootstrap credentials**: The access workspace needs credentials for its first apply before WIF exists. What credential type (static key, manual token, existing WIF pool) and where is it stored?
-- **Access workspace placement and circular dependency**: The module's `apply_to_all_workspaces` attaches the variable set to ALL workspaces in the TFC project — including the access workspace itself. The [experiment](../experiments/terraform-automation-tools/hcp-terraform-wif-playground.md) found this causes a circular dependency on partial apply. Two options: (a) place the access workspace in a separate TFC project (experiment recommendation), or (b) keep it in the same TFC project and use workspace-level variable overrides to prevent the module-created variable set from overriding bootstrap credentials.
 - **Plan vs. apply role assignment**: The module creates separate plan and apply SAs. The [experiment](../experiments/terraform-automation-tools/hcp-terraform-wif-playground.md) validated `plan_roles = apply_roles` (unified identity). An alternative is plan SA = view-only, apply SA = full write for least-privilege separation. The team should decide whether the additional IAM configuration is worth the security benefit.
 
 ### Future Considerations
@@ -232,3 +234,4 @@ The PagerDuty workspace uses a PagerDuty API key — no GCP IAM needed. It does 
 - [gcp-dynamic-creds module](https://app.terraform.io/app/hp-platform-engineering/registry/modules/private/hp-platform-engineering/gcp-dynamic-creds/tfe) — TFC private registry
 - [infra-platform#90](https://github.com/openshift-online/infra-platform/pull/90) — Module implementation
 - [Miro: TFC Workspace Architecture](https://miro.com/app/board/uXjVH9A0m0w=/?focusWidget=3458764677714315706) — Architecture diagram from Sr Eng call
+- [Global Environment Setup Guide](https://github.com/openshift-online/gcp-hcp-infra/blob/main/terraform/config/global/SETUP.md) — Bootstrap pattern for new environments (same local-apply approach used for access projects)
