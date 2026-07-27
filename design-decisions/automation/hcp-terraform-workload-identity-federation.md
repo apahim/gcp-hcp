@@ -17,7 +17,7 @@ HCP Terraform workspaces that manage GCP infrastructure must authenticate via Wo
   - Cross-project IAM grants (SA in project A managing resources in projects B, C, D) are outside the module's scope
   - The module call must not live in the same TFC project as the workspaces it configures — partial apply creates a circular dependency where the variable set delivers credentials pointing at non-existent SAs (see [experiment issue #1](../experiments/terraform-automation-tools/hcp-terraform-wif-playground.md))
   - CI requires a TFC API token (`TFE_TOKEN`) for private registry module sourcing ([release#82376](https://github.com/openshift/release/pull/82376))
-  - Atlantis currently manages 34 unique IAM roles across global (19 project-level + 3 folder-level), region (24), and management-cluster (20) modules
+  - Atlantis currently manages 34 unique IAM role types across modules. Per-module binding counts are higher due to overlap: global (19 project-level + 3 folder-level), region (24), and management-cluster (20)
 - **Assumptions**:
   - The module will continue to be published to the TFC private registry at `app.terraform.io/hp-platform-engineering/gcp-dynamic-creds/tfe`
   - Each environment follows the same access project pattern
