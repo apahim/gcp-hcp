@@ -6,7 +6,7 @@
 | Date | YYYY-MM-DD |
 | Status | Draft |
 | Status Change Date | YYYY-MM-DD |
-| Reviewed By | YYYY-MM-DD |
+| Reviewed By | TBD |
 | Source | TBD |
 | PM Owner(s) | TBD |
 | Feature Lead(s) | \< \> |
@@ -36,7 +36,7 @@ Describe the high-level proposed solution on how this will be implemented.
 
 ### User Experience
 
-Describe how customers will interact with this feature and use it. Describe the rosa CLI, OCM UI, terraform interactions. Include a User Journey/Mapping diagram to help describe the user experience. Provide any example inputs and outputs and any industry standard examples to use as a guideline.
+Describe how customers will interact with this feature and use it. Describe the ROSA CLI, OCM UI, terraform interactions. Include a User Journey/Mapping diagram to help describe the user experience. Provide any example inputs and outputs and any industry-standard examples to use as a guideline.
 
 ### Goals / Non-Goals
 
@@ -85,9 +85,7 @@ Describe any new or existing service level objectives that will be affected by t
 
 | Supported Client | Supported? |
 | :---- | :---- |
-| ROSA CLI | N/A |
-| OCM CLI | N/A |
-| OCM UI | N/A |
+| GCP HCP CLI | N/A |
 | Terraform | N/A |
 | CAPI | N/A |
 
@@ -141,6 +139,6 @@ Please refer to the Stakeholders listed here for team information: [SD-ADR-0000:
 |  |  |  |  |  |
 |  |  |  |  |  |
 
-## Compete (optional)
+## Competitive Analysis (optional)
 
 Describe if ARO Classic or ARO HCP has a similar capability (or limitation).
