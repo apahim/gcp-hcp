@@ -59,7 +59,7 @@ New  -->  Refinement  -->  To Do  -->  In Progress  -->  Review  -->  Closed
 
 ### Board
 
-**TODO:** Create a dedicated **Risk Board** (Kanban) filtered to `issuetype = Risk AND project = GCP` to provide a view of all team risks and their current status.
+The [GCP Risks Kanban Board](https://redhat.atlassian.net/jira/software/c/projects/GCP/boards/13256) provides a view of all team risks and their current status.
 
 Useful JQL queries for risk management:
 
@@ -173,6 +173,22 @@ Escalate a risk to leadership when:
 - The risk affects a milestone commitment
 - The risk requires cross-team coordination or external dependencies
 - The risk has been open for more than two sprints without progress on mitigation
+
+## Risks Review Meeting
+
+**Cadence:** Monthly
+**Purpose:** Monthly sync to discuss project risks, assess probability/impact, and determine mitigation plans.
+**Goal:** Updated risks, clear mitigation strategies, risk escalation where needed.
+
+### Recurring Agenda
+
+1. Triage existing risks — review scores, status, and mitigation progress
+2. Identify any additional risks to track
+
+### Resources
+
+- [GCP Risks Kanban Board](https://redhat.atlassian.net/jira/software/c/projects/GCP/boards/13256)
+- [GCP HCP Risks Dashboard](https://redhat.atlassian.net/jira/dashboards/26267)
 
 ## Related Documents
 
