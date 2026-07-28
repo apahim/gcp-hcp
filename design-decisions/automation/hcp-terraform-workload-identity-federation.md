@@ -1,4 +1,4 @@
-# HCP Terraform Must Authenticate via infra-platform WIF Module with Dedicated Access Projects
+# HCP Terraform Must Use Workload Identity Federation with Dedicated Access Projects
 
 ***Scope***: GCP-HCP
 
@@ -6,30 +6,30 @@
 
 ## Decision
 
-HCP Terraform workspaces that manage GCP infrastructure must authenticate via Workload Identity Federation (WIF) using the infra-platform [`terraform-tfe-gcp-dynamic-creds`](https://app.terraform.io/app/hp-platform-engineering/registry/modules/private/hp-platform-engineering/gcp-dynamic-creds/tfe) module. Each environment gets a dedicated GCP project (e.g., `gcp-hcp-tfc-access-{env}`) that hosts the WIF pool, OIDC provider, and plan/apply service accounts. The module's `apply_to_all_workspaces` flag delivers WIF credentials to all workspaces in a TFC project automatically via a project-scoped variable set.
+HCP Terraform workspaces that manage GCP infrastructure must authenticate via Workload Identity Federation (WIF) with dedicated access GCP projects per environment. Each access project (e.g., `gcp-hcp-tfc-access-{env}`) hosts the WIF pool, OIDC provider, and plan/apply service accounts. The implementation uses the infra-platform [`terraform-tfe-gcp-dynamic-creds`](https://app.terraform.io/app/hp-platform-engineering/registry/modules/private/hp-platform-engineering/gcp-dynamic-creds/tfe) module for alignment with organizational tooling, though the architecture does not depend on it — the same setup could be achieved with ~30 lines of direct Terraform. The module's `apply_to_all_workspaces` flag delivers WIF credentials to all workspaces in a TFC project automatically via a project-scoped variable set.
 
 ## Context
 
-- **Problem Statement**: HCP Terraform is replacing Atlantis for infrastructure automation ([GCP-536](https://redhat.atlassian.net/browse/GCP-536)). TFC workspaces need to authenticate to GCP APIs to manage resources across multiple GCP projects per environment (global, region, management-cluster) without static service account keys. The infra-platform team published a reusable module ([infra-platform#90](https://github.com/openshift-online/infra-platform/pull/90)) that automates WIF pool, service account, and variable set lifecycle. However, the module creates resources within a single GCP project per call — it cannot natively handle the cross-project IAM pattern that Atlantis uses (one SA in the global project managing resources across global, region, and MC projects).
+- **Problem Statement**: HCP Terraform is replacing Atlantis for infrastructure automation ([GCP-536](https://redhat.atlassian.net/browse/GCP-536)). TFC workspaces need to authenticate to GCP APIs to manage resources across multiple GCP projects per environment (global, region, management-cluster) without static service account keys. The architecture follows the same central-identity model as Atlantis — a single set of SAs in a dedicated project receives cross-project IAM grants on each target project. The infra-platform team published a reusable module ([infra-platform#90](https://github.com/openshift-online/infra-platform/pull/90)) that automates WIF pool, service account, and variable set lifecycle within a single GCP project per call. Cross-project IAM grants are managed separately in each target module, identical to the existing `atlantis.tf` pattern.
 - **Constraints**:
   - No static GCP service account JSON keys (platform-wide WIF-first policy)
   - The module creates a WIF pool, OIDC provider, plan/apply SAs, and a TFC variable set — all scoped to a single GCP project per call
   - Cross-project IAM grants (SA in project A managing resources in projects B, C, D) are outside the module's scope
-  - The module call must not live in the same TFC project as the workspaces it configures — partial apply creates a circular dependency where the variable set delivers credentials pointing at non-existent SAs (see [experiment issue #1](../experiments/terraform-automation-tools/hcp-terraform-wif-playground.md))
+  - ~~The module call must not live in the same TFC project as the workspaces it configures~~ — resolved upstream in [infra-platform#119](https://github.com/openshift-online/infra-platform/pull/119) via `depends_on`, which ensures variable sets are not created until all cloud resources (WIF pool, provider, SAs) exist
   - CI requires a TFC API token (`TFE_TOKEN`) for private registry module sourcing ([release#82376](https://github.com/openshift/release/pull/82376))
   - Atlantis currently manages 34 unique IAM role types across modules. Per-module binding counts are higher due to overlap: global (19 project-level + 3 folder-level), region (24), and management-cluster (20)
 - **Assumptions**:
   - The module will continue to be published to the TFC private registry at `app.terraform.io/hp-platform-engineering/gcp-dynamic-creds/tfe`
-  - Each environment follows the same access project pattern
+  - Each long-lived environment (integration, stage, production) follows the same access project pattern. Dynamic environments (dev, e2e) may require a different approach and are out of scope for this decision
   - The `apply_to_all_workspaces` module feature remains stable
 
 ## Alternatives Considered
 
 1. **Module with dedicated access projects**: One `gcp-dynamic-creds` module call per environment, targeting a purpose-built GCP project that hosts only WIF resources (pool, provider, SAs). `apply_to_all_workspaces = true` delivers credentials to all workspaces in the TFC project. Cross-project IAM grants on target projects (global, region, MC) are managed separately via `tfc.tf` files in each infrastructure module.
 
-2. **Direct WIF (no module)**: ~30 lines of Terraform per environment — one SA in the environment's global project, one WIF pool, one OIDC provider. Same cross-project IAM pattern as Atlantis. No module dependency, no additional GCP projects.
+2. **Direct WIF (no module)**: Architecturally identical to Alternative 1 — same central-identity model with cross-project grants. The difference is where the WIF resources live (environment's global project vs. dedicated access project) and whether the WIF plumbing is hand-written (~30 lines of Terraform) or module-managed. No module dependency, no additional GCP projects, but more resources bootstrapped in the global project.
 
-3. **Module targeting environment global projects directly**: One module call per target project (global, region, MC) within the same environment. Module creates per-project SAs with roles only on that project.
+3. **Module targeting environment global projects directly**: One module call per target project (global, region, MC) within the same environment. Module creates per-project SAs with roles only on that project. Each new region or MC would require its own module call and bootstrap.
 
 4. **Direct Workload Identity (no SAs)**: Use `TFC_GCP_PRINCIPAL_TYPE = workload_pool` with direct `principal://` IAM bindings. Eliminates service accounts entirely — the WIF federated identity accesses GCP resources directly.
 
@@ -43,10 +43,10 @@ HCP Terraform workspaces that manage GCP infrastructure must authenticate via Wo
   - The module was validated end-to-end in the [Phase 2 experiment](../experiments/terraform-automation-tools/hcp-terraform-wif-playground.md): WIF pool, plan/apply SAs, and variable sets created successfully; a validation workspace authenticated with zero explicit WIF variables via `apply_to_all_workspaces` inheritance.
   - Default audience behavior works — no `TFC_GCP_WORKLOAD_IDENTITY_AUDIENCE` variable needed. The module does not set `allowed_audiences` on the OIDC provider, and HCP Terraform defaults to the provider resource name as the audience.
   - Workspace-scoped attribute conditions (`assertion.sub.startsWith(...)`) restrict authentication to the correct TFC project.
-  - The circular dependency issue (module-created variable set poisoning the calling workspace) is resolved by isolating the module call from the workspaces it serves — either via a separate TFC project or workspace-level variable overrides (see [Open Items](#open-items)).
+  - The circular dependency issue (module-created variable set poisoning the calling workspace on partial apply) is resolved upstream in [infra-platform#119](https://github.com/openshift-online/infra-platform/pull/119) — the module now uses `depends_on` to ensure variable sets are not created until all cloud resources exist. The access workspace can safely live in the same TFC project as the workspaces it configures.
 
 * **Comparison**:
-  - **Alternative 2 (direct WIF)** is simpler (~30 lines of Terraform) and avoids a module dependency, but provides no alignment with the infra-platform team's tooling. The WIF plumbing is straightforward but error-prone — audience mismatch between `TFC_GCP_WORKLOAD_PROVIDER_AUDIENCE` (legacy) and `TFC_GCP_WORKLOAD_IDENTITY_AUDIENCE` (Dynamic Provider Credentials) caused debugging overhead during Phase 1. The module encapsulates these details.
+  - **Alternative 2 (direct WIF)** is architecturally the same — central identity with cross-project grants. The difference is operational: WIF resources live in the global project (more resources to bootstrap there) vs. a dedicated access project (clean separation). The module encapsulates WIF plumbing details that were error-prone during manual setup (audience mismatch between `TFC_GCP_WORKLOAD_PROVIDER_AUDIENCE` and `TFC_GCP_WORKLOAD_IDENTITY_AUDIENCE` caused debugging overhead in Phase 1). No alignment with infra-platform team tooling.
   - **Alternative 3 (module per target project)** was explored and abandoned. Calling the module once per target project (global, region, MC) creates 6 SAs per environment (plan + apply x 3 projects), produces 3 variable sets for one TFC project with undefined precedence behavior, and requires supplemental cross-project IAM grants outside the module for every target project. The region module creates resources on both the region project AND the global project (`modules/region/global-iam.tf`) — a per-region-project SA cannot do this without additional grants. See [experiment issue #7](../experiments/terraform-automation-tools/hcp-terraform-wif-playground.md) for variable set precedence findings.
   - **Alternative 4 (direct WID)** eliminates SAs entirely but requires `principal://` IAM binding support across every GCP resource type the team manages (GKE, Compute, DNS, Secret Manager, Workflows, Pub/Sub, Eventarc, Cloud Run, Tags, PAM, BigQuery, Artifact Registry). This was never validated, and discovering an unsupported resource type during production rollout would require a mid-migration architecture change.
   - **Alternative 5 (static keys)** is prohibited by platform security policy and introduces key management burden.
@@ -200,12 +200,9 @@ Commons grants require SRE manual apply (commons module is not managed by Atlant
 
 ### CI Workspaces
 
-CI workspaces (`hypershift-ci`, `platform-ci`) target single GCP projects with no cross-project IAM requirements. Two options are viable:
+`hypershift-ci` targets a single GCP project. `platform-ci` creates region and management-cluster projects, so it has the same cross-project IAM requirements as environment workspaces — the same access project pattern applies.
 
-- **Module**: Same `gcp-dynamic-creds` pattern with a CI-scoped access project or one module call per CI project
-- **Existing Prow WIF pools**: Extend the existing CI project WIF pools with a TFC OIDC provider
-
-CI handling will be finalized during implementation.
+The `gcp-dynamic-creds` module is a natural fit for both CI workspaces. Alternatively, existing Prow WIF pools could be extended with a TFC OIDC provider. CI handling will be finalized during implementation.
 
 ### PagerDuty
 
@@ -218,7 +215,7 @@ The PagerDuty workspace uses a PagerDuty API key — no GCP IAM needed. It does 
 - **Access project creation and bootstrap credentials**: The access project and WIF resources are bootstrapped locally following the same pattern as environment setup ([gcp-hcp-infra SETUP.md](https://github.com/openshift-online/gcp-hcp-infra/blob/main/terraform/config/global/SETUP.md)). An operator runs `terraform apply` locally with their own `gcloud` credentials and a `TFE_TOKEN` to create the access GCP project, WIF pool, SAs, and TFC variable set in a single apply. State is then migrated to TFC (the access workspace takes over ongoing management). No static service account keys are needed. The operator needs folder-admin permissions (to create the project), `iam.workloadIdentityPoolAdmin` + `iam.serviceAccountAdmin` (for WIF resources), and a TFC API token (for variable set creation).
 - **Circular dependency**: The local bootstrap sidesteps the circular dependency entirely — the first apply runs locally, not in a TFC workspace, so there is no workspace for `apply_to_all_workspaces` to poison. After state is migrated to TFC, the access workspace inherits its own variable set, but at that point the SAs already exist and the credentials are valid. If a future `terraform apply` on the access workspace partially fails (e.g., SA recreation), the same manual detach-and-reapply fix from the [experiment](../experiments/terraform-automation-tools/hcp-terraform-wif-playground.md) applies.
 
-- **Plan vs. apply role assignment**: The module creates separate plan and apply SAs with distinct roles. The plan SA gets view access on each target project (sufficient for `terraform plan`). The apply SA gets the full write role set (matching Atlantis). Cross-project IAM in each module's `tfc.tf` grants the appropriate roles to each SA separately.
+- **Plan vs. apply role assignment**: The module creates separate plan and apply SAs with distinct roles. The plan SA gets view access on each target project (sufficient for `terraform plan`). The apply SA gets the full write role set (matching Atlantis). Cross-project IAM in each module's `tfc.tf` grants the appropriate roles to each SA separately. If the plan/apply split causes issues (e.g., `terraform plan` needing write-adjacent permissions), the module supports `use_apply_role_for_plan` ([infra-platform#119](https://github.com/openshift-online/infra-platform/pull/119)) to fall back to unified roles.
 
 ### Future Considerations
 
