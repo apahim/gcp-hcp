@@ -25,7 +25,7 @@ TFC Workspace (e.g., gcp-hcp-global-integration)
     │      (module-managed, apply_to_all_workspaces=true)
     │
     ├─ 2. TFC generates OIDC token → GCP STS validates against
-    │      WIF provider in gcp-hcp-tfc-access-{env}
+    │      WIF provider in gcp-hcp-{env_abbrev}-tfc-access
     │      attribute_condition scoped to TFC project
     │
     ├─ 3. STS returns federated token → exchanged for SA access token
@@ -55,11 +55,12 @@ Create the dedicated access GCP project for integration, containing the WIF pool
 ### Tasks
 
 - [ ] Create `terraform/config/tfc-access/integration/main.tf`:
-  - `google_project` resource for `gcp-hcp-tfc-access-int` in the integration folder
+  - `google_project` resource for `gcp-hcp-int-tfc-access` in the integration folder
   - `gcp-dynamic-creds` module call sourced from `app.terraform.io/hp-platform-engineering/gcp-dynamic-creds/tfe`
   - Module inputs: `project_id`, `tfc_organization`, `tfc_project_name = "gcp-hcp-integration"`, `apply_to_all_workspaces = true`
-  - `plan_roles` — view-level roles sufficient for `terraform plan` on all target projects
-  - `apply_roles` — full role set matching Atlantis (see IAM audit below)
+  - `plan_roles` — `roles/viewer` (read access on the access project only)
+  - `apply_roles` — self-management roles for the access project only: `roles/viewer`, `roles/iam.workloadIdentityPoolAdmin`, `roles/iam.serviceAccountAdmin`, `roles/resourcemanager.projectIamAdmin`, `roles/serviceusage.serviceUsageAdmin`
+  - Note: these roles apply to the access project, not target projects. The full Atlantis role set is granted on target projects in Story 2 (cross-project IAM).
   - `cloud {}` backend block (commented out for initial local apply)
 - [ ] Create `terraform/config/tfc-access/integration/versions.tf` with provider version constraints
 - [ ] Run `terraform init && terraform apply` locally
@@ -70,7 +71,7 @@ Create the dedicated access GCP project for integration, containing the WIF pool
 
 ### Acceptance Criteria
 
-- [ ] GCP project `gcp-hcp-tfc-access-int` exists in the integration folder
+- [ ] GCP project `gcp-hcp-int-tfc-access` exists in the integration folder
 - [ ] WIF pool and OIDC provider exist in the access project
 - [ ] Plan and apply SAs exist in the access project
 - [ ] TFC variable set `*-gcp-dynamic-creds` attached to `gcp-hcp-integration` project with `apply_to_all_workspaces = true`
@@ -143,7 +144,7 @@ Grant the apply SA access to commons resources: Terraform state bucket, GAR repo
   - `roles/artifactregistry.admin` on commons GAR repo for apply SA
   - `roles/iam.serviceAccountTokenCreator` on `project-creator` SA for apply SA
   - Iterate over `var.environment_dns_zones` (excluding dev)
-  - Members: `serviceAccount:{plan_sa}@gcp-hcp-tfc-access-{env}.iam.gserviceaccount.com` and `serviceAccount:{apply_sa}@gcp-hcp-tfc-access-{env}.iam.gserviceaccount.com`
+  - Members: `serviceAccount:{plan_sa}@gcp-hcp-{env_abbrev}-tfc-access.iam.gserviceaccount.com` and `serviceAccount:{apply_sa}@gcp-hcp-{env_abbrev}-tfc-access.iam.gserviceaccount.com`
   - Note: `objectViewer` is correct — matches Atlantis. Workspace state lives in TFC (cloud backend), not GCS. The commons bucket is only accessed via `terraform_remote_state` data sources for commons outputs.
 - [ ] Coordinate with SRE for manual apply
 
@@ -241,7 +242,7 @@ Extend automation tooling for TFC workspace generation and update design docs.
 
 Same as Stories 1–5 for the stage environment:
 
-- Target access project: `gcp-hcp-tfc-access-stg`
+- Target access project: `gcp-hcp-stg-tfc-access`
 - Target projects: `gcp-hcp-stg-global`, `stg-reg-*`, `stg-mgt-*`
 - New workspace definitions: `hcp-terraform/gcp-hcp-stg/`
 - TFC project: `gcp-hcp-stage`
@@ -256,7 +257,7 @@ Deploy TFC to production. Production does not have Atlantis today, so TFC will b
 
 **Depends on**: Stories 5 and 7 (integration and stage validated)
 
-- Target access project: `gcp-hcp-tfc-access-prd`
+- Target access project: `gcp-hcp-prd-tfc-access`
 - Target projects: `gcp-hcp-prd-global`, `prd-reg-*`, `prd-mgt-*`
 - New workspace definitions: `hcp-terraform/gcp-hcp-prd/`
 - TFC project: `gcp-hcp-production`

@@ -6,7 +6,7 @@
 
 ## Decision
 
-HCP Terraform workspaces that manage GCP infrastructure must authenticate via Workload Identity Federation (WIF) with dedicated access GCP projects per environment. Each access project (e.g., `gcp-hcp-tfc-access-{env}`) hosts the WIF pool, OIDC provider, and plan/apply service accounts. The implementation uses the infra-platform [`terraform-tfe-gcp-dynamic-creds`](https://app.terraform.io/app/hp-platform-engineering/registry/modules/private/hp-platform-engineering/gcp-dynamic-creds/tfe) module for alignment with organizational tooling, though the architecture does not depend on it — the same setup could be achieved with ~30 lines of direct Terraform. The module's `apply_to_all_workspaces` flag delivers WIF credentials to all workspaces in a TFC project automatically via a project-scoped variable set.
+HCP Terraform workspaces that manage GCP infrastructure must authenticate via Workload Identity Federation (WIF) with dedicated access GCP projects per environment. Each access project (e.g., `gcp-hcp-{env_abbrev}-tfc-access`) hosts the WIF pool, OIDC provider, and plan/apply service accounts. The implementation uses the infra-platform [`terraform-tfe-gcp-dynamic-creds`](https://app.terraform.io/app/hp-platform-engineering/registry/modules/private/hp-platform-engineering/gcp-dynamic-creds/tfe) module for alignment with organizational tooling, though the architecture does not depend on it — the same setup could be achieved with ~30 lines of direct Terraform. The module's `apply_to_all_workspaces` flag delivers WIF credentials to all workspaces in a TFC project automatically via a project-scoped variable set.
 
 ## Context
 
@@ -64,7 +64,7 @@ HCP Terraform workspaces that manage GCP infrastructure must authenticate via Wo
 
 ### Negative
 
-* Introduces a new GCP project per environment (`gcp-hcp-tfc-access-{env}`) solely for WIF resources — additional project to create and manage
+* Introduces a new GCP project per environment (`gcp-hcp-{env_abbrev}-tfc-access`) solely for WIF resources — additional project to create and manage
 * Access workspace requires bootstrap with local or static credentials for initial apply — a manual step per environment
 * Module dependency on infra-platform releases — upstream changes or breakages affect WIF infrastructure
 * Cross-project IAM grants (the bulk of the implementation) are still managed separately outside the module — the module only handles WIF plumbing within the access project
@@ -119,7 +119,7 @@ Per Environment:
 │  │ (bootstrap: local/static creds)   │                        │
 │  │                                   │                        │
 │  │  gcp-dynamic-creds module call    │                        │
-│  │  → target: gcp-hcp-tfc-access-{env} GCP project           │
+│  │  → target: gcp-hcp-{env_abbrev}-tfc-access GCP project           │
 │  │  → creates: WIF pool, OIDC provider, plan/apply SAs       │
 │  │  → creates: variable set (apply_to_all_workspaces=true)   │
 │  └───────────────────────────────────┘                        │
@@ -138,7 +138,7 @@ Per Environment:
 GCP Projects:
 
 ┌──────────────────────────────┐     ┌──────────────────────┐
-│ gcp-hcp-tfc-access-{env}    │     │ gcp-hcp-{env}-global │
+│ gcp-hcp-{env_abbrev}-tfc-access    │     │ gcp-hcp-{env}-global │
 │                              │     │                      │
 │  • WIF pool                  │     │  • Infrastructure    │
 │  • OIDC provider             │     │  • Cross-project IAM │
@@ -171,13 +171,13 @@ HCP Terraform Workspace (e.g., gcp-hcp-global-integration)
     │                workspace:gcp-hcp-global-{env}:run_phase:apply
     │
     ├─ 3. Token sent to GCP STS
-    │      → validated against WIF provider in gcp-hcp-tfc-access-{env}
+    │      → validated against WIF provider in gcp-hcp-{env_abbrev}-tfc-access
     │      → attribute_condition checks sub starts with
     │        "...project:gcp-hcp-{env}:..."
     │
     ├─ 4. STS returns federated token
     │      → exchanged for apply SA access token
-    │      SA: {prefix}-apply@gcp-hcp-tfc-access-{env}.iam.gserviceaccount.com
+    │      SA: {prefix}-apply@gcp-hcp-{env_abbrev}-tfc-access.iam.gserviceaccount.com
     │
     └─ 5. SA token used for GCP API calls on target projects
            (requires cross-project IAM grants on global/region/MC projects)
@@ -194,7 +194,7 @@ The module does not manage cross-project IAM. The plan and apply SAs in the acce
 | Management-Cluster | `modules/management-cluster/tfc.tf` | 20 cross-project | Copy from `atlantis.tf` |
 | Commons | `modules/commons/tfc-iam.tf` | 3 cross-project | `storage.objectViewer` on state bucket, `artifactregistry.admin` on GAR, `iam.serviceAccountTokenCreator` on `project-creator` SA |
 
-Member format: `serviceAccount:{sa_name}@gcp-hcp-tfc-access-{env}.iam.gserviceaccount.com`
+Member format: `serviceAccount:{sa_name}@gcp-hcp-{env_abbrev}-tfc-access.iam.gserviceaccount.com`
 
 Commons grants require SRE manual apply (commons module is not managed by Atlantis).
 
