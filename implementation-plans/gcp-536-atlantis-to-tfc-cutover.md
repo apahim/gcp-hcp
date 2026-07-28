@@ -64,9 +64,9 @@ Create the dedicated access GCP project for integration, containing the WIF pool
 - [ ] Create `terraform/config/tfc-access/integration/versions.tf` with provider version constraints
 - [ ] Run `terraform init && terraform apply` locally
 - [ ] Verify in TFC UI: variable set exists, `apply_to_all_workspaces` is enabled, 4 `TFC_GCP_*` variables present
+- [ ] Register access workspace in meta workspace (`hcp-terraform/meta/main.tf` or equivalent) — workspace must exist before state migration
 - [ ] Uncomment `cloud {}` backend block
 - [ ] Run `terraform init -migrate-state` to migrate state to TFC
-- [ ] Register access workspace in meta workspace (`hcp-terraform/meta/main.tf` or equivalent)
 
 ### Acceptance Criteria
 
@@ -138,15 +138,18 @@ Grant the apply SA access to commons resources: Terraform state bucket, GAR repo
 ### Tasks
 
 - [ ] Create `terraform/modules/commons/tfc-iam.tf` (parallel to `atlantis-iam.tf`):
-  - `roles/storage.objectViewer` on commons TF state bucket for apply SA
+  - `roles/storage.objectViewer` on commons TF state bucket for plan SA — needed for `terraform_remote_state` reads during speculative plans
+  - `roles/storage.objectViewer` on commons TF state bucket for apply SA — same reads during apply phase
   - `roles/artifactregistry.admin` on commons GAR repo for apply SA
   - `roles/iam.serviceAccountTokenCreator` on `project-creator` SA for apply SA
   - Iterate over `var.environment_dns_zones` (excluding dev)
-  - Member: `serviceAccount:{apply_sa}@gcp-hcp-tfc-access-{env}.iam.gserviceaccount.com`
+  - Members: `serviceAccount:{plan_sa}@gcp-hcp-tfc-access-{env}.iam.gserviceaccount.com` and `serviceAccount:{apply_sa}@gcp-hcp-tfc-access-{env}.iam.gserviceaccount.com`
+  - Note: `objectViewer` is correct — matches Atlantis. Workspace state lives in TFC (cloud backend), not GCS. The commons bucket is only accessed via `terraform_remote_state` data sources for commons outputs.
 - [ ] Coordinate with SRE for manual apply
 
 ### Acceptance Criteria
 
+- [ ] Plan SA can read commons Terraform state (for `terraform_remote_state` in speculative plans)
 - [ ] Apply SA can read commons Terraform state
 - [ ] Apply SA can push to commons GAR
 - [ ] Apply SA can impersonate `project-creator` SA
@@ -245,11 +248,33 @@ Same as Stories 1–5 for the stage environment:
 
 ---
 
-## Story 8: Cutover and Decommission Atlantis
+## Story 8: Production Rollout
 
 ### Summary
 
-Disable Atlantis and remove its infrastructure after TFC is validated in integration and stage.
+Deploy TFC to production. Production does not have Atlantis today, so TFC will be the first automation. Same Stories 1–5 pattern, but no Atlantis cutover or parallel-running concern.
+
+**Depends on**: Stories 5 and 7 (integration and stage validated)
+
+- Target access project: `gcp-hcp-tfc-access-prd`
+- Target projects: `gcp-hcp-prd-global`, `prd-reg-*`, `prd-mgt-*`
+- New workspace definitions: `hcp-terraform/gcp-hcp-prd/`
+- TFC project: `gcp-hcp-production`
+
+### Notes
+
+Production introduces additional considerations not present in integration/stage:
+- Change approval gates may be stricter (RBAC, policy enforcement)
+- First apply is also the first automated apply in production — manual validation of the initial plan is critical
+- No Atlantis to compare against — validation relies on manual spot-checks and expected no-op plans
+
+---
+
+## Story 9: Cutover and Decommission Atlantis
+
+### Summary
+
+Disable Atlantis and remove its infrastructure after TFC is validated in integration, stage, and production.
 
 ### Tasks
 
@@ -292,13 +317,13 @@ Stories 2 and 3 can run in parallel (both depend only on Story 1).
 | Commons module requires SRE manual apply | Coordinate with SRE; include in phase sequencing |
 | Atlantis and TFC both triggering on same PR | Disable Atlantis autoplan for workspaces that TFC manages before enabling TFC |
 | Module upstream breakage | Pin to specific module version in TFC private registry; test upgrades in integration first |
-| Plan SA needs more than viewer for certain plans | If `terraform plan` fails with viewer-only, add specific read roles to plan SA on a case-by-case basis |
+| Plan SA needs more than viewer for certain plans | If `terraform plan` fails with viewer-only, add specific read roles to plan SA — or use `use_apply_role_for_plan` ([infra-platform#119](https://github.com/openshift-online/infra-platform/pull/119)) to fall back to unified roles |
 
 ## CI Workspaces (Deferred)
 
-CI workspaces (`hypershift-ci`, `platform-ci`) target single GCP projects with no cross-project IAM. Two options under evaluation:
+`hypershift-ci` targets a single GCP project. `platform-ci` creates region and management-cluster projects, so it has the same cross-project IAM requirements as environment workspaces — the same access project pattern applies. Two options under evaluation:
 
-- `gcp-dynamic-creds` module with a CI-scoped access project
+- `gcp-dynamic-creds` module (same access project pattern)
 - Extend existing Prow WIF pools with a TFC OIDC provider
 
 CI workspace migration will be planned separately after environment workspaces are validated.
