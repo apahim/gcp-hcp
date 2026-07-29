@@ -6,7 +6,9 @@ Migrate infrastructure automation from self-hosted Atlantis to HCP Terraform Clo
 
 Integration environment first, then stage. Production does not have Atlantis today, so TFC will be the first automation there.
 
-**Jira**: [GCP-536](https://redhat.atlassian.net/browse/GCP-536)
+**Epic**: [GCP-532](https://redhat.atlassian.net/browse/GCP-532) - Terraform Cloud Evaluation & Plan
+
+**Spike**: [GCP-536](https://redhat.atlassian.net/browse/GCP-536) - Evaluate HCP Terraform for GCP-HCP Infrastructure
 
 **Design decision**: [hcp-terraform-workload-identity-federation](../design-decisions/automation/hcp-terraform-workload-identity-federation.md)
 
