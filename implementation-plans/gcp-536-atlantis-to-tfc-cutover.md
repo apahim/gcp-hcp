@@ -37,6 +37,57 @@ TFC Workspace (e.g., gcp-hcp-global-integration)
 
 ---
 
+## Spike Evaluation Summary
+
+Findings from the [GCP-536](https://redhat.atlassian.net/browse/GCP-536) spike mapped to each evaluation area. The design decision and experiment docs cover authentication in depth; this section captures the remaining areas.
+
+### 1. Workflow Fit
+
+TFC uses a VCS-driven workflow: push to a branch triggers a speculative plan, merge to main triggers an apply. This replaces Atlantis's PR-comment-driven model (`atlantis plan`, `atlantis apply`). Key differences:
+
+- **Plan triggers**: Automatic on PR push (no manual comment needed). Plans appear as GitHub check runs, not PR comments.
+- **Apply triggers**: Configurable per workspace. Auto-apply on merge to main, or require manual confirmation in the TFC UI. We will start with manual confirmation and evaluate auto-apply after validation (Story 5).
+- **Parallel operations**: TFC queues runs per workspace. Multiple PRs touching different workspaces run in parallel. PRs touching the same workspace queue sequentially (same as Atlantis per-project locking).
+- **Developer experience**: Plan output is in the TFC UI (linked from the GitHub check), not inline in the PR. This is a visibility tradeoff: richer UI with history and logs, but one click away from the PR.
+
+### 2. Authorization (RBAC)
+
+TFC supports team-based access control at the organization, project, and workspace level. Evaluation is deferred to production rollout (Story 8) where stricter approval gates matter. For integration and stage:
+
+- All team members (`gcp-hcp-eng`) have admin access on TFC projects (configured in infra-platform bootstrap)
+- Apply approval is manual in the TFC UI (any team member can confirm)
+- Sentinel/OPA policies enforce deletion protection (already configured via bootstrap module)
+- Production will require a more restrictive model (e.g., separate plan-only and apply-allowed teams)
+
+### 3. State Management
+
+TFC manages workspace state internally. No migration from GCS is needed for new workspaces since TFC workspaces use the `cloud {}` backend from the start.
+
+For existing infrastructure currently managed by Atlantis (global, region, MC), the workspaces will continue using GCS backends. TFC runs `terraform plan/apply` against the same GCS state buckets Atlantis uses today. No state migration is required for the cutover. The access workspace is the only workspace using TFC-managed state.
+
+### 4. Integration Points
+
+- **GitHub App**: TFC uses the org-level GitHub App configured in infra-platform bootstrap. No per-environment GitHub App needed (unlike Atlantis which requires one per environment).
+- **Pre-apply validation**: Atlantis uses `hack/check-pr-labels.sh` to validate PR labels before apply. TFC equivalent is run tasks or Sentinel policies. For the initial migration, this validation will be handled by the existing Prow CI checks which remain unchanged. A TFC-native replacement can be added later if needed.
+- **Drift detection**: TFC supports scheduled health assessments that detect configuration drift. Enabled per workspace via `assessments_enabled`. Will be evaluated during Story 5 validation but is not a migration blocker.
+- **OPA/Sentinel policies**: Deletion protection policy already enforced via the bootstrap module (`gcp-hcp-deletion-protection` policy set). Additional policies can be added incrementally.
+
+### 5. Operational Considerations
+
+- **Availability**: TFC is a managed SaaS with [published SLA](https://www.hashicorp.com/cloud-operating-model). Removes the operational burden of running Atlantis on GKE (pod restarts, scaling, certificate renewal, Helm upgrades). If TFC is unavailable, no runs execute, but infrastructure is unaffected (same failure mode as Atlantis GKE downtime).
+- **Auditability**: TFC provides a full audit log of all runs, state changes, and user actions per workspace. GCP Cloud Audit Logs record all API calls made by the plan/apply SAs. Combined, these provide a stronger audit trail than Atlantis (which relies on GKE pod logs that are subject to retention limits).
+- **Cost**: WIF and STS token exchanges are free. TFC workspace costs are governed by the organization plan (managed by infra-platform team). No additional GCP charges beyond the access project (which has no running resources).
+- **Fallback**: During the migration (Stories 1-5), Atlantis remains fully operational. TFC runs speculative plans only until validation is complete. Atlantis is not decommissioned until Story 9, after TFC is proven in all environments. If TFC does not work out, Atlantis continues as-is with no rollback needed.
+
+### 6. Migration Strategy
+
+- **Parallel running**: Atlantis and TFC coexist during migration. Atlantis handles all applies until TFC is validated. TFC runs speculative plans for comparison (Story 5). Risk of both systems triggering on the same PR is mitigated by disabling Atlantis autoplan for TFC-managed workspaces before enabling TFC applies.
+- **Phased rollout**: Integration first (Stories 1-5), then stage (Story 7), then production (Story 8). Each environment is fully validated before the next begins.
+- **Rollback**: At any point before Story 9 (decommission), Atlantis can resume full control by disabling TFC workspace auto-apply and re-enabling Atlantis autoplan. No state migration is involved since infrastructure workspaces use GCS backends throughout.
+- **Order**: Lowest risk first. Integration has the fewest projects and the most tolerance for experimentation. Production is last and has no existing Atlantis to cut over from.
+
+---
+
 ## Story 1: Bootstrap Access Project (Integration)
 
 ### Summary
