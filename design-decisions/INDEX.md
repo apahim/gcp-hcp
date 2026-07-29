@@ -39,6 +39,7 @@ Decision records organized by topic. Use [TEMPLATE.md](TEMPLATE.md) when adding 
 | [iap-authentication](identity/iap-authentication.md) | Identity-Aware Proxy for internal tooling authentication |
 | [pam-workflow-gating](identity/pam-workflow-gating.md) | GCP PAM with resource tags to gate sensitive Cloud Workflows behind approval |
 | [zero-operator-access](identity/zero-operator-access.md) | Layered model restricting human and AI agent access to production resources |
+| [gecko-api-aggregation](identity/gecko-api-aggregation.md) | Delegate gecko internal API authn/authz to GKE kube-apiserver via API aggregation |
 
 ## Observability
 
