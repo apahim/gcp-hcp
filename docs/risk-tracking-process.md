@@ -114,7 +114,7 @@ Good times to identify risks:
 The risk owner (or the team during grooming) evaluates the risk:
 
 1. Set **Risk Probability** and **Risk Impact** using the scoring criteria below (Risk Score and Risk Score Assessment are calculated automatically)
-2. Write a mitigation/contingency plan in the **Description** field
+2. Write a mitigation/contingency plan in the **Description** field, including the rationale behind the chosen probability and impact levels
 3. Optionally set **Risk Response**, **Risk Proximity**, and **Risk Category** if they add clarity
 4. Link the risk to any related epics, stories, or features using issue links
 5. Transition status to **Refinement** or directly to **In Progress** if mitigation is already underway
