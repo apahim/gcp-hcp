@@ -62,6 +62,7 @@ The [Platform API decision](../governance/platform-api.md) established gecko as 
 * Authorization via native Kubernetes RBAC — policies auditable via standard `kubectl get clusterrolebindings`.
 * TLS enforced between kube-apiserver and gecko via cert-manager certificates.
 * `system:auth-delegator` ClusterRoleBinding and `extension-apiserver-authentication-reader` RoleBinding are the only cluster-level RBAC grants gecko requires.
+* `--disable-auth` binds the private API to localhost only, so it cannot be reached off-host even if set by mistake in a deployed environment. Startup and deployment tests cover this binding behavior.
 
 ### Performance:
 
