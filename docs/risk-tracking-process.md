@@ -123,39 +123,29 @@ The risk owner (or the team during grooming) evaluates the risk:
 
 Assign the level where any one of the criteria applies:
 
-| Weight | Level | Criteria |
-|-------|-------|----------|
-| 1 | Rare | Theoretical; no precedent in this or similar projects |
-| 2 | Unlikely | Has happened elsewhere but conditions aren't present here |
-| 3 | Moderate | Has happened before or some contributing factors exist today |
-| 4 | Likely | Contributing factors are active; expected without changes |
-| 5 | Very Likely | Already showing early signs; a matter of when, not if |
+| Level | Criteria |
+|-------|----------|
+| Rare | Theoretical; no precedent in this or similar projects |
+| Unlikely | Has happened elsewhere but conditions aren't present here |
+| Moderate | Has happened before or some contributing factors exist today |
+| Likely | Contributing factors are active; expected without changes |
+| Very Likely | Already showing early signs; a matter of when, not if |
 
 #### Impact
 
-Impact levels carry non-linear weights that reflect exponentially increasing severity. Assign the level where any one of the criteria applies:
+Assign the level where any one of the criteria applies. Impact levels carry non-linear weights in the score calculation (see [Risk Score](#risk-score)).
 
-| Weight | Level | Criteria |
-|--------|-------|----------|
-| 1 | Annoyance | Cosmetic or documentation issue, OR no effect on delivery, service, or customers, OR absorbed within normal workflow without re-planning |
-| 3 | Low | Small delay or workaround required, OR limited to a single team or component, OR no customer-visible effect, OR minimal rework (days, not weeks) |
-| 9 | Moderate | Noticeable delay to a milestone, OR partial service degradation, OR affects multiple components or teams, OR requires engineering intervention or re-planning, OR SLO breach possible |
-| 32 | Medium | Significant schedule slip (weeks), OR service outage or data integrity issue, OR blocks dependent work streams, OR affects customers directly, OR reputational or compliance risk |
-| 50 | High | Project delivery blocked, OR complete service unavailability or data loss, OR security or compliance breach, OR affects all customers or the entire project timeline, OR regulatory or contractual consequences |
+| Level | Criteria |
+|-------|----------|
+| Annoyance | Cosmetic or documentation issue, OR no effect on delivery, service, or customers, OR absorbed within normal workflow without re-planning |
+| Low | Small delay or workaround required, OR limited to a single team or component, OR no customer-visible effect, OR minimal rework (days, not weeks) |
+| Moderate | Noticeable delay to a milestone, OR partial service degradation, OR affects multiple components or teams, OR requires engineering intervention or re-planning, OR SLO breach possible |
+| Medium | Significant schedule slip (weeks), OR service outage or data integrity issue, OR blocks dependent work streams, OR affects customers directly, OR reputational or compliance risk |
+| High | Project delivery blocked, OR complete service unavailability or data loss, OR security or compliance breach, OR affects all customers or the entire project timeline, OR regulatory or contractual consequences |
 
-#### Risk Score Matrix
+#### Risk Score
 
-Risk Score = Probability weight × Impact weight. Scores are auto-calculated by Jira.
-
-| | Annoyance (1) | Low (3) | Moderate (9) | Medium (32) | High (50) |
-|---|---|---|---|---|---|
-| **Rare (1)** | 1 | 3 | 9 | 32 | 50 |
-| **Unlikely (2)** | 2 | 6 | 18 | 64 | 100 |
-| **Moderate (3)** | 3 | 9 | 27 | 96 | 150 |
-| **Likely (4)** | 4 | 12 | 36 | 128 | 200 |
-| **Very Likely (5)** | 5 | 15 | 45 | 160 | 250 |
-
-Scores of **96+** (Med Hi assessment) should be escalated. See [Escalation](#escalation).
+Risk Score (Probability weight × Impact weight) and Risk Score Assessment are **auto-calculated by a [ScriptRunner script in Jira](https://redhat.atlassian.net/wiki/spaces/HUB/pages/190188660/Risk+Work+Type+Issue+Type+and+Risk+Score+Calculation+Process)**. The Impact weights are non-linear (see the linked page for the full scoring matrix), producing scores in the range 1–250. Scores of **96+** (Med Hi assessment) should be escalated. See [Escalation](#escalation).
 
 ### 3. Track
 
