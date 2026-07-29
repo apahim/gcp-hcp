@@ -7,7 +7,7 @@ description: How the GCP HCP team identifies, assesses, tracks, and mitigates pr
 
 ***Scope***: GCP-HCP
 
-**Date**: 2026-04-17
+**Date**: 2026-07-28
 
 This document defines how the GCP HCP team identifies, assesses, tracks, and mitigates project risks.
 
@@ -21,18 +21,23 @@ Use the **Risk issue type** in the GCP Jira project.
 
 | Field | Jira Field ID | Type | Purpose |
 |-------|---------------|------|---------|
-| Risk Probability | customfield_10642 | Dropdown | How likely is this risk to occur (1-5) |
-| Risk Impact | customfield_10842 | Dropdown | Severity if the risk materializes (1-5) |
-| Risk Score | customfield_10976 | Number | Calculated severity (Probability x Impact) |
+| Risk Probability | customfield_10642 | Dropdown | How likely is this risk to occur (Rare → Very Likely) |
+| Risk Impact | customfield_10842 | Dropdown | Severity if the risk materializes (Annoyance → High) |
+
+**Auto-calculated fields** (populated by ScriptRunner when Probability and Impact are set):
+
+| Field | Jira Field ID | Type | Purpose |
+|-------|---------------|------|---------|
+| Risk Score | customfield_10976 | Number | Probability weight × Impact weight (range: 1–250) |
+| Risk Score Assessment | customfield_10974 | Text | Overall assessment label (Low, Low Med, Medium, Med Hi, High) |
 
 **Optional fields** (available on the screen, use when they add value):
 
 | Field | Jira Field ID | Type | Purpose |
 |-------|---------------|------|---------|
-| Risk Proximity | customfield_10645 | Dropdown | How soon the risk could materialize |
-| Risk Response | customfield_10846 | Dropdown | Response strategy (Avoid, Mitigate, Transfer, Accept) |
-| Risk Category | customfield_10679 | Dropdown | Classification (Technical, Schedule, Resource, etc.) |
-| Risk Score Assessment | customfield_10974 | Paragraph | Qualitative risk assessment narrative |
+| Risk Proximity | customfield_10645 | Dropdown | When the risk could materialize (Imminent, Short term, Medium term, Long term) |
+| Risk Response | customfield_10846 | Dropdown | Response strategy (Accept, Avoid, Enhance, Exploit, Mitigate, Share, Transfer) |
+| Risk Category | customfield_10679 | Dropdown | Classification (Competitive, Customer Impact, Infrastructure, Legal, Opportunity, Quality, Reputation, Resource, Schedule, Scope) |
 
 Standard Jira fields are also used:
 
@@ -57,14 +62,15 @@ New  -->  Refinement  -->  To Do  -->  In Progress  -->  Review  -->  Closed
 - **Review** -- mitigation actions are complete; risk is being validated as resolved
 - **Closed** -- risk has been resolved, accepted, or is no longer relevant
 
-### Board
+### Board & Dashboard
 
-The [GCP Risks Kanban Board](https://redhat.atlassian.net/jira/software/c/projects/GCP/boards/13256) provides a view of all team risks and their current status.
+- **[Risk Kanban Board](https://redhat.atlassian.net/jira/software/c/projects/GCP/boards/13256)** -- all GCP risks by workflow status
+- **[Risk Dashboard](https://redhat.atlassian.net/jira/dashboards/26267)** -- aggregated risk metrics and trends
 
 Useful JQL queries for risk management:
 
 - **All open risks**: `issuetype = Risk AND project = GCP AND status != Closed`
-- **High-severity risks**: `issuetype = Risk AND project = GCP AND "Risk Score" >= 10`
+- **High-severity risks (Med Hi+)**: `issuetype = Risk AND project = GCP AND "Risk Score" >= 96`
 - **Risks needing owners**: `issuetype = Risk AND project = GCP AND assignee = EMPTY AND status != Closed`
 
 ## Qualifying a Risk
@@ -107,41 +113,44 @@ Good times to identify risks:
 
 The risk owner (or the team during grooming) evaluates the risk:
 
-1. Set **Risk Probability** and **Risk Impact** using the scoring criteria below
-2. Calculate and set **Risk Score** (Probability x Impact)
-3. Write a mitigation/contingency plan in the **Description** field
-4. Optionally set **Risk Response**, **Risk Proximity**, and **Risk Category** if they add clarity
-5. Link the risk to any related epics, stories, or features using issue links
-6. Transition status to **Refinement** or directly to **In Progress** if mitigation is already underway
+1. Set **Risk Probability** and **Risk Impact** using the scoring criteria below (Risk Score and Risk Score Assessment are calculated automatically)
+2. Write a mitigation/contingency plan in the **Description** field, including the rationale behind the chosen probability and impact levels
+3. Optionally set **Risk Response**, **Risk Proximity**, and **Risk Category** if they add clarity
+4. Link the risk to any related epics, stories, or features using issue links
+5. Transition status to **Refinement** or directly to **In Progress** if mitigation is already underway
 
-#### Probability (1-5)
+#### Probability
 
-Assign the score where any one of the criteria applies:
+Assign the level where any one of the criteria applies:
 
-| Score | Level | Criteria |
-|-------|-------|----------|
-| 1 | Rare | Theoretical; no precedent in this or similar projects |
-| 2 | Unlikely | Has happened elsewhere but conditions aren't present here |
-| 3 | Moderate | Has happened before or some contributing factors exist today |
-| 4 | Likely | Contributing factors are active; expected without changes |
-| 5 | Very Likely | Already showing early signs; a matter of when, not if |
+| Level | Criteria |
+|-------|----------|
+| Rare | Theoretical; no precedent in this or similar projects |
+| Unlikely | Has happened elsewhere but conditions aren't present here |
+| Moderate | Has happened before or some contributing factors exist today |
+| Likely | Contributing factors are active; expected without changes |
+| Very Likely | Already showing early signs; a matter of when, not if |
 
-#### Impact (1-5)
+#### Impact
 
-Assign the score where any one of the criteria applies:
+Assign the level where any one of the criteria applies. Impact levels carry non-linear weights in the score calculation (see [Risk Score](#risk-score)).
 
-| Score | Level | Criteria |
-|-------|-------|----------|
-| 1 | Annoyance | Cosmetic or documentation issue, OR no effect on delivery, service, or customers, OR absorbed within normal workflow without re-planning |
-| 2 | Low | Small delay or workaround required, OR limited to a single team or component, OR no customer-visible effect, OR minimal rework (days, not weeks) |
-| 3 | Moderate | Noticeable delay to a milestone, OR partial service degradation, OR affects multiple components or teams, OR requires engineering intervention or re-planning, OR SLO breach possible |
-| 4 | Medium | Significant schedule slip (weeks), OR service outage or data integrity issue, OR blocks dependent work streams, OR affects customers directly, OR reputational or compliance risk |
-| 5 | High | Project delivery blocked, OR complete service unavailability or data loss, OR security or compliance breach, OR affects all customers or the entire project timeline, OR regulatory or contractual consequences |
+| Level | Criteria |
+|-------|----------|
+| Annoyance | Cosmetic or documentation issue, OR no effect on delivery, service, or customers, OR absorbed within normal workflow without re-planning |
+| Low | Small delay or workaround required, OR limited to a single team or component, OR no customer-visible effect, OR minimal rework (days, not weeks) |
+| Moderate | Noticeable delay to a milestone, OR partial service degradation, OR affects multiple components or teams, OR requires engineering intervention or re-planning, OR SLO breach possible |
+| Medium | Significant schedule slip (weeks), OR service outage or data integrity issue, OR blocks dependent work streams, OR affects customers directly, OR reputational or compliance risk |
+| High | Project delivery blocked, OR complete service unavailability or data loss, OR security or compliance breach, OR affects all customers or the entire project timeline, OR regulatory or contractual consequences |
+
+#### Risk Score
+
+Risk Score (Probability weight × Impact weight) and Risk Score Assessment are **auto-calculated by a [ScriptRunner script in Jira](https://redhat.atlassian.net/wiki/spaces/HUB/pages/190188660/Risk+Work+Type+Issue+Type+and+Risk+Score+Calculation+Process)**. The Impact weights are non-linear (see the linked page for the full scoring matrix), producing scores in the range 1–250. Scores of **96+** (Med Hi assessment) should be escalated. See [Escalation](#escalation).
 
 ### 3. Track
 
 - **Grooming**: Triage newly identified risks (status = New). Assign owners. Assess probability and impact.
-- **Sprint reviews**: Review the Risk Board. Update status and scores for any risks that have changed.
+- **Sprint reviews**: Review the Risk Board. Update status, probability, and impact for any risks that have changed.
 - **Monthly**: Review all open risks with the full team. Close risks that are no longer relevant. Identify new risks.
 
 ### 4. Respond
@@ -169,7 +178,7 @@ Add a comment explaining the closure rationale.
 
 Escalate a risk to leadership when:
 
-- Risk Score is >= 10
+- Risk Score Assessment is **Med Hi** or **High** (score >= 96)
 - The risk affects a milestone commitment
 - The risk requires cross-team coordination or external dependencies
 - The risk has been open for more than two sprints without progress on mitigation
