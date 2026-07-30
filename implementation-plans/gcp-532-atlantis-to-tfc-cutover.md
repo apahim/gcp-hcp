@@ -63,9 +63,9 @@ TFC supports team-based access control at the organization, project, and workspa
 
 ### 3. State Management
 
-TFC manages workspace state internally. No migration from GCS is needed for new workspaces since TFC workspaces use the `cloud {}` backend from the start.
+TFC manages workspace state internally. New workspaces (like the access workspace) use the `cloud {}` backend from the start.
 
-For existing infrastructure currently managed by Atlantis (global, region, MC), the workspaces will continue using GCS backends. TFC runs `terraform plan/apply` against the same GCS state buckets Atlantis uses today. No state migration is required for the cutover. The access workspace is the only workspace using TFC-managed state.
+For existing infrastructure currently managed by Atlantis (global, region, MC), state will migrate from GCS into TFC as part of the per-workspace cutover. Each workspace switches its backend from GCS to `cloud {}` and runs `terraform init` to migrate state into TFC. This is a one-time operation per workspace. After migration, TFC manages state natively and the GCS state bucket is no longer used for that workspace. Alternatively, infrastructure workspaces could be configured with the `cloud {}` backend from the start, bypassing GCS migration entirely. This approach will be evaluated during Story 4.
 
 ### 4. Integration Points
 
@@ -83,9 +83,9 @@ For existing infrastructure currently managed by Atlantis (global, region, MC), 
 
 ### 6. Migration Strategy
 
-- **Parallel running**: Atlantis and TFC coexist during migration. Atlantis handles all applies until TFC is validated. TFC runs speculative plans for comparison (Story 5). Risk of both systems triggering on the same PR is mitigated by disabling Atlantis autoplan for TFC-managed workspaces before enabling TFC applies.
+- **Per-workspace cutover**: Atlantis and TFC are never active on the same workspace simultaneously. Each workspace is cut over individually: Atlantis autoplan is disabled for that workspace, then TFC takes over. During the migration period, some workspaces may still be on Atlantis while others have moved to TFC, but there is no overlap per workspace.
 - **Phased rollout**: Integration first (Stories 1-5), then stage (Story 7), then production (Story 8). Each environment is fully validated before the next begins.
-- **Rollback**: At any point before Story 9 (decommission), Atlantis can resume full control by disabling TFC workspace auto-apply and re-enabling Atlantis autoplan. No state migration is involved since infrastructure workspaces use GCS backends throughout.
+- **Rollback**: At any point before Story 9 (decommission), a workspace can be reverted to Atlantis by disabling TFC auto-apply, migrating state back to GCS (`terraform init -migrate-state`), and re-enabling Atlantis autoplan for that workspace.
 - **Order**: Lowest risk first. Integration has the fewest projects and the most tolerance for experimentation. Production is last and has no existing Atlantis to cut over from.
 
 ---
