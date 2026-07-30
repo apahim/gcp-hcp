@@ -19,7 +19,7 @@ Register a new container image in the `gcp-hcp-tenant` Konflux tenant on the `kf
 
 1. Find the konflux-release-data repo. Run:
    ```bash
-   find "$HOME/git" -maxdepth 3 -type d -name "konflux-release-data" 2>/dev/null | head -5
+   find "$HOME" -maxdepth 5 -type d -name "konflux-release-data" -not -path "*/Library/*" -not -path "*/.Trash/*" 2>/dev/null | head -5
    ```
    If multiple results, prefer a path under the user's own username directory.
    If no results, ask the user for the path.
