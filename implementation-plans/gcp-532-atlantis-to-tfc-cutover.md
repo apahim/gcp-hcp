@@ -49,7 +49,7 @@ TFC uses a VCS-driven workflow: push to a branch triggers a speculative plan, me
 
 - **Plan triggers**: Automatic on PR push (no manual comment needed). Plans appear as GitHub check runs, not PR comments.
 - **Apply triggers**: Configurable per workspace. Auto-apply on merge to main, or require manual confirmation in the TFC UI. We will start with manual confirmation and evaluate auto-apply after validation (Story 5).
-- **Parallel operations**: TFC queues runs per workspace. Multiple PRs touching different workspaces run in parallel. PRs touching the same workspace queue sequentially (same as Atlantis per-project locking).
+- **Parallel operations**: TFC serializes standard plan/apply runs per workspace, but speculative plans (triggered by PR pushes) run concurrently and do not block the run queue. Multiple PRs touching the same workspace can generate speculative plans simultaneously. This differs from Atlantis, which serializes all operations per project including plans.
 - **Developer experience**: Plan output is in the TFC UI (linked from the GitHub check), not inline in the PR. This is a visibility tradeoff: richer UI with history and logs, but one click away from the PR.
 
 ### 2. Authorization (RBAC)
@@ -77,7 +77,7 @@ For existing infrastructure currently managed by Atlantis (global, region, MC), 
 ### 5. Operational Considerations
 
 - **Availability**: TFC is a managed SaaS with [published SLA](https://www.hashicorp.com/cloud-operating-model). Removes the operational burden of running Atlantis on GKE (pod restarts, scaling, certificate renewal, Helm upgrades). If TFC is unavailable, no runs execute, but infrastructure is unaffected (same failure mode as Atlantis GKE downtime).
-- **Auditability**: TFC provides a full audit log of all runs, state changes, and user actions per workspace. GCP Cloud Audit Logs record all API calls made by the plan/apply SAs. Combined, these provide a stronger audit trail than Atlantis (which relies on GKE pod logs that are subject to retention limits).
+- **Auditability**: TFC provides organization-scoped audit trails (retained 14 days via the Audit Trails API), plus per-workspace run history and state versions (retained for the lifetime of the workspace). GCP Cloud Audit Logs record all API calls made by the plan/apply SAs. For long-term audit retention beyond 14 days, log forwarding to an external system (e.g., Splunk) would be needed. This is still an improvement over Atlantis, which relies on GKE pod logs subject to cluster-level retention limits.
 - **Cost**: WIF and STS token exchanges are free. TFC workspace costs are governed by the organization plan (managed by infra-platform team). No additional GCP charges beyond the access project (which has no running resources).
 - **Fallback**: During the migration (Stories 1-5), Atlantis remains fully operational. TFC runs speculative plans only until validation is complete. Atlantis is not decommissioned until Story 9, after TFC is proven in all environments. If TFC does not work out, Atlantis continues as-is with no rollback needed.
 
@@ -85,7 +85,7 @@ For existing infrastructure currently managed by Atlantis (global, region, MC), 
 
 - **Per-workspace cutover**: Atlantis and TFC are never active on the same workspace simultaneously. Each workspace is cut over individually: Atlantis autoplan is disabled for that workspace, then TFC takes over. During the migration period, some workspaces may still be on Atlantis while others have moved to TFC, but there is no overlap per workspace.
 - **Phased rollout**: Integration first (Stories 1-5), then stage (Story 7), then production (Story 8). Each environment is fully validated before the next begins.
-- **Rollback**: At any point before Story 9 (decommission), a workspace can be reverted to Atlantis by disabling TFC auto-apply, migrating state back to GCS (`terraform init -migrate-state`), and re-enabling Atlantis autoplan for that workspace.
+- **Rollback**: At any point before Story 9 (decommission), a workspace can be reverted to Atlantis: disable TFC auto-apply, cancel any in-flight runs, discard runs waiting for confirmation, wait for the workspace lock to clear, migrate state back to GCS, then re-enable Atlantis autoplan for that workspace.
 - **Order**: Lowest risk first. Integration has the fewest projects and the most tolerance for experimentation. Production is last and has no existing Atlantis to cut over from.
 
 ---
