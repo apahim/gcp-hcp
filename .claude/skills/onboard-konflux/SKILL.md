@@ -28,7 +28,12 @@ Register a new container image in the `gcp-hcp-tenant` Konflux tenant on the `kf
    ```bash
    git -C <repo> remote get-url origin
    ```
-   The origin URL must match `gitlab.cee.redhat.com:releng/konflux-release-data` (SSH or HTTPS). If it does not, ask the user to confirm or provide the correct path. Do not run `build-manifests.sh` from an unvalidated directory.
+   Normalize the URL to extract the host and repository path. Accept any of these trusted forms:
+   - `git@gitlab.cee.redhat.com:releng/konflux-release-data.git` (SSH)
+   - `https://gitlab.cee.redhat.com/releng/konflux-release-data.git` (HTTPS)
+   - Either form without the `.git` suffix
+
+   The repository path must be `releng/konflux-release-data` on `gitlab.cee.redhat.com`. If it does not match, ask the user to confirm or provide the correct path. Do not run `build-manifests.sh` from an unvalidated directory.
 
 2. Set `TENANT_DIR` = `<repo>/tenants-config/cluster/kflux-prd-rh02/tenants/gcp-hcp-tenant`
 
@@ -335,19 +340,21 @@ You should see new files matching the resources you created (Application, Compon
 
 ## Phase 6: Validate
 
-Run kustomize build and capture the exit status separately — do not pipe directly to grep, which masks build failures:
+Run kustomize build using the full `$TENANT_DIR` path and capture output to a private temp file:
 
 ```bash
-kustomize build tenants-config/cluster/kflux-prd-rh02/tenants/gcp-hcp-tenant/ > /tmp/kustomize-output.yaml 2>&1
+KUST_OUT=$(mktemp)
+kustomize build "$TENANT_DIR" > "$KUST_OUT" 2>&1
 ```
 
-If the command fails (non-zero exit), read the output and fix the errors before proceeding.
+If the command fails (non-zero exit), read `$KUST_OUT` and fix the errors before proceeding.
 
 If it succeeds, check for warnings and verify the new app appears:
 
 ```bash
-grep -i "error\|warning" /tmp/kustomize-output.yaml || echo "Clean build"
-grep "<app-name>" /tmp/kustomize-output.yaml
+grep -i "error\|warning" "$KUST_OUT" || echo "Clean build"
+grep "<app-name>" "$KUST_OUT"
+rm -f "$KUST_OUT"
 ```
 
 If there are errors or the app name is missing, fix them before proceeding.
