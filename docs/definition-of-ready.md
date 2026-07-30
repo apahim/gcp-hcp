@@ -45,8 +45,9 @@ Initiatives represent internal/architectural work at Level 4. See [Jira Hierarch
 - [ ] **Acceptance Criteria** are specific and measurable (3+ criteria)
 - [ ] **Priority** is set (Blocker/Critical/Major/Normal/Minor)
 - [ ] **Dependencies** are identified (other Initiatives, external teams, approvals)
-- [ ] **Assignee** is assigned
 - [ ] At least one **Epic** has been identified for breakdown
+
+**Note on Assignee**: Initiatives in To Do state should remain **unassigned**. An assignee is not required to be "ready." If offline work is needed during Refinement, someone may be temporarily assigned to gather information, but the item should be unassigned when it moves to To Do. Assignee is set when work begins and the item moves to In Progress. See [feature-initiative-playbook.md](./feature-initiative-playbook.md).
 
 **Template**: [docs/jira-initiative-template.md](./jira-initiative-template.md)
 
@@ -63,9 +64,10 @@ Features represent customer-facing capabilities at Level 4. See [Jira Hierarchy]
 - [ ] **Acceptance Criteria** are specific and measurable (3+ criteria)
 - [ ] **Priority** is set (Blocker/Critical/Major/Normal/Minor)
 - [ ] **Dependencies** are identified and documented
-- [ ] **Assignee** is assigned
 - [ ] **Demo Critical** flag is set (Yes/No)
 - [ ] At least one **Epic** has been identified for breakdown
+
+**Note on Assignee**: Features in To Do state should remain **unassigned**. An assignee is not required to be "ready." If offline work is needed during Refinement, someone may be temporarily assigned to gather information, but the item should be unassigned when it moves to To Do. Assignee is set when work begins and the item moves to In Progress. See [feature-initiative-playbook.md](./feature-initiative-playbook.md).
 
 **Template**: [docs/jira-feature-template.md](./jira-feature-template.md)
 
