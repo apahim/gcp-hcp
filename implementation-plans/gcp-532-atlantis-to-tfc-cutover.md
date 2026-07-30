@@ -31,8 +31,8 @@ TFC Workspace (e.g., gcp-hcp-global-integration)
     │      attribute_condition scoped to TFC project
     │
     ├─ 3. STS returns federated token → exchanged for SA access token
-    │      Plan phase: plan SA (view access on target projects)
-    │      Apply phase: apply SA (write access on target projects)
+    │      Plan phase: plan SA (unified roles, same as apply)
+    │      Apply phase: apply SA (full write access on target projects)
     │
     └─ 4. SA token used for GCP API calls on target projects
 ```

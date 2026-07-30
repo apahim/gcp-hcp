@@ -78,7 +78,7 @@ HCP Terraform workspaces that manage GCP infrastructure must authenticate via Wo
 * Federated OIDC tokens are short-lived (~1h) and scoped to the specific HCP Terraform run phase (plan or apply)
 * Workspace-scoped `attribute_condition` on the WIF provider restricts federation to workspaces within the configured TFC project — tighter than the org-wide condition used in Phase 1
 * No secrets stored in HCP Terraform — the token exchange uses the workspace's OIDC identity
-* Plan SA can be restricted to read-only roles on target projects, limiting blast radius during speculative plans
+* Plan and apply SAs start with unified roles on target projects so permission gaps surface at plan time. The plan SA can be restricted to read-only later if tighter speculative plan isolation is needed
 * Access project contains only WIF resources — compromising it does not expose infrastructure state or resources
 
 ### Operability:
