@@ -137,7 +137,7 @@ Create the dedicated access GCP project for integration, containing the WIF pool
 
 ### Summary
 
-Grant the plan SA view access and the apply SA write access on each target project (global, region, MC). This mirrors the existing `atlantis.tf` IAM pattern but with two SAs instead of one.
+Grant both the plan and apply SAs the full write role set on each target project (global, region, MC). Using unified roles means permission gaps surface during `terraform plan` rather than only at apply time. This mirrors the existing `atlantis.tf` IAM pattern but with two SAs instead of one.
 
 **Repo**: `gcp-hcp-infra`
 **Applied by**: Atlantis PR
@@ -151,16 +151,14 @@ Grant the plan SA view access and the apply SA write access on each target proje
     `container.admin`, `gkehub.admin`, `compute.networkAdmin`, `storage.admin`, `compute.instanceAdmin.v1`, `iam.serviceAccountAdmin`, `resourcemanager.projectIamAdmin`, `serviceusage.serviceUsageAdmin`, `compute.securityAdmin`, `dns.admin`, `secretmanager.admin`, `certificatemanager.editor`, `iap.admin`, `artifactregistry.admin`, `cloudbuild.builds.editor`, `logging.admin`, `iam.workloadIdentityPoolAdmin`, `monitoring.metricsScopesAdmin`, `monitoring.editor`
   - Apply SA — 3 folder-level roles (on `folders/{parent_folder_id}`):
     `resourcemanager.projectCreator`, `resourcemanager.folderAdmin`, `logging.configWriter`
-  - Plan SA — `roles/viewer` on the global project (minimum for speculative plans)
+  - Plan SA — same 19 project-level roles as apply SA (unified roles catch permission issues at plan time)
   - All resources gated by `var.enable_tfc`
 - [ ] Create `terraform/modules/region/tfc.tf`:
-  - Apply SA — 24 cross-project roles (same as `atlantis.tf`):
+  - Both SAs — 24 cross-project roles (same as `atlantis.tf`):
     `resourcemanager.projectIamAdmin`, `viewer`, `container.admin`, `compute.networkAdmin`, `storage.admin`, `compute.instanceAdmin.v1`, `iam.serviceAccountAdmin`, `iam.serviceAccountUser`, `serviceusage.serviceUsageAdmin`, `compute.securityAdmin`, `dns.admin`, `gkehub.admin`, `secretmanager.admin`, `workflows.admin`, `run.admin`, `pubsub.admin`, `eventarc.admin`, `resourcemanager.tagAdmin`, `resourcemanager.tagUser`, `privilegedaccessmanager.admin`, `storage.hmacKeyAdmin`, `bigquery.admin`, `artifactregistry.admin`, `monitoring.metricsScopesAdmin`
-  - Plan SA — `roles/viewer` on the region project
   - Same bootstrap pattern as `atlantis.tf` (project-creator impersonation for initial `projectIamAdmin`)
 - [ ] Create `terraform/modules/management-cluster/tfc.tf`:
-  - Apply SA — 20 cross-project roles (region minus: `gkehub.admin`, `storage.hmacKeyAdmin`, `bigquery.admin`, `artifactregistry.admin`)
-  - Plan SA — `roles/viewer` on the MC project
+  - Both SAs — 20 cross-project roles (region minus: `gkehub.admin`, `storage.hmacKeyAdmin`, `bigquery.admin`, `artifactregistry.admin`)
 - [ ] Enable in integration configs:
   - `terraform/config/global/integration/main/us-central1/main.tf`: `enable_tfc = true`, `tfc_plan_sa_email = "..."`, `tfc_apply_sa_email = "..."`
   - `terraform/config/region/integration/main/us-central1/main.tf`: same
@@ -170,8 +168,7 @@ Grant the plan SA view access and the apply SA write access on each target proje
 ### Acceptance Criteria
 
 - [ ] `terraform plan` shows IAM bindings for both plan and apply SAs on all target projects
-- [ ] After apply, plan SA can read resources in global/region/MC projects
-- [ ] After apply, apply SA can create/modify resources in global/region/MC projects
+- [ ] After apply, both plan and apply SAs can read and modify resources in global/region/MC projects
 
 ### Notes
 
