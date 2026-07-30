@@ -344,6 +344,7 @@ Run kustomize build using the full `$TENANT_DIR` path and capture output to a pr
 
 ```bash
 KUST_OUT=$(mktemp)
+trap 'rm -f "$KUST_OUT"' EXIT
 kustomize build "$TENANT_DIR" > "$KUST_OUT" 2>&1
 ```
 
@@ -354,7 +355,6 @@ If it succeeds, check for warnings and verify the new app appears:
 ```bash
 grep -i "error\|warning" "$KUST_OUT" || echo "Clean build"
 grep "<app-name>" "$KUST_OUT"
-rm -f "$KUST_OUT"
 ```
 
 If there are errors or the app name is missing, fix them before proceeding.
