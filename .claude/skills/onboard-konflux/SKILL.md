@@ -24,6 +24,12 @@ Register a new container image in the `gcp-hcp-tenant` Konflux tenant on the `kf
    If multiple results, prefer a path under the user's own username directory.
    If no results, ask the user for the path.
 
+   **Validate the repo** before proceeding — confirm it is the expected checkout:
+   ```bash
+   git -C <repo> remote get-url origin
+   ```
+   The origin URL must match `gitlab.cee.redhat.com:releng/konflux-release-data` (SSH or HTTPS). If it does not, ask the user to confirm or provide the correct path. Do not run `build-manifests.sh` from an unvalidated directory.
+
 2. Set `TENANT_DIR` = `<repo>/tenants-config/cluster/kflux-prd-rh02/tenants/gcp-hcp-tenant`
 
 3. Read the current state:
@@ -39,10 +45,12 @@ Register a new container image in the `gcp-hcp-tenant` Konflux tenant on the `kf
 
 If `$ARGUMENTS` was provided, use it as the app name. Otherwise, ask the user.
 
+**Validate the app name** before using it anywhere: it must be a valid DNS-1123 subdomain (lowercase alphanumeric and hyphens only, no leading/trailing hyphens, max 63 characters). Reject names with uppercase, whitespace, underscores, dots, or shell metacharacters. Prompt the user to re-enter if invalid.
+
 Use `AskUserQuestion` to collect these details (skip questions where the user already provided answers):
 
 ### Required
-- **App name**: The Konflux application/component name. Convention: prefix with the project name if the binary name is generic (e.g., `gecko-platform-api-server`, not just `platform-api-server`).
+- **App name**: The Konflux application/component name. Must be DNS-1123 compliant (lowercase, alphanumeric, hyphens). Convention: prefix with the project name if the binary name is generic (e.g., `gecko-platform-api-server`, not just `platform-api-server`).
 - **Source git repo URL**: The GitHub/GitLab repo URL (e.g., `https://github.com/openshift-online/gecko.git`)
 - **Git revision**: Branch to track (default: `main`)
 - **Containerfile path**: Path to the Containerfile/Dockerfile within the source repo, relative to repo root (e.g., `deploy/platform-api/Containerfile`)
@@ -124,8 +132,8 @@ metadata:
   annotations:
     build.appstudio.openshift.io/request: configure-pac
     build.appstudio.openshift.io/pipeline: '{"name":"docker-build-oci-ta","bundle":"latest"}'
-    git-provider: github
-    git-provider-url: https://github.com
+    git-provider: <git-provider>
+    git-provider-url: <git-provider-url>
 spec:
   application: <app-name>
   componentName: <app-name>
@@ -137,7 +145,9 @@ spec:
       dockerfileUrl: <containerfile-path>
 ```
 
-**Note:** If the source repo is on GitLab instead of GitHub, change `git-provider` and `git-provider-url` accordingly.
+**Derive `git-provider` and `git-provider-url` from the source repo URL:**
+- If URL contains `github.com`: `git-provider: github`, `git-provider-url: https://github.com`
+- If URL contains `gitlab`: `git-provider: gitlab`, `git-provider-url: https://<gitlab-host>`
 
 ### 3c. `applications/<app-name>/components/image-repository.yaml`
 
@@ -279,8 +289,12 @@ resources:
   - application.yaml
   - components
   - integration-test-enterprise-contract.yaml
-  - release-plan.yaml            # include if GAR
-  - release-plan-quay.yaml       # include if Quay
+```
+
+Include `release-plan.yaml` only if GAR was selected. Include `release-plan-quay.yaml` only if Quay was selected. Include both if "Both" was selected. Example for GAR-only:
+
+```yaml
+  - release-plan.yaml
 ```
 
 ---
@@ -321,19 +335,22 @@ You should see new files matching the resources you created (Application, Compon
 
 ## Phase 6: Validate
 
-Run kustomize build and check for errors:
+Run kustomize build and capture the exit status separately — do not pipe directly to grep, which masks build failures:
 
 ```bash
-kustomize build tenants-config/cluster/kflux-prd-rh02/tenants/gcp-hcp-tenant/ 2>&1 | grep -i "error\|warning" || echo "Clean build"
+kustomize build tenants-config/cluster/kflux-prd-rh02/tenants/gcp-hcp-tenant/ > /tmp/kustomize-output.yaml 2>&1
 ```
 
-Verify the new app appears in the rendered output:
+If the command fails (non-zero exit), read the output and fix the errors before proceeding.
+
+If it succeeds, check for warnings and verify the new app appears:
 
 ```bash
-kustomize build tenants-config/cluster/kflux-prd-rh02/tenants/gcp-hcp-tenant/ 2>&1 | grep "<app-name>"
+grep -i "error\|warning" /tmp/kustomize-output.yaml || echo "Clean build"
+grep "<app-name>" /tmp/kustomize-output.yaml
 ```
 
-If there are errors, fix them before proceeding.
+If there are errors or the app name is missing, fix them before proceeding.
 
 ---
 
