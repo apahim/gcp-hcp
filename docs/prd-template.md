@@ -36,7 +36,7 @@ Describe the high-level proposed solution on how this will be implemented.
 
 ### User Experience
 
-Describe how customers will interact with this feature and use it. Describe the ROSA CLI, OCM UI, Terraform interactions. Include a User Journey/Mapping diagram to help describe the user experience. Provide any example inputs and outputs and any industry-standard examples to use as a guideline.
+Describe how customers will interact with this feature and use it. Describe the CLI, UI, API and Terraform client interactions. Include a User Journey/Mapping diagram to help describe the user experience. Provide any example inputs and outputs and any industry-standard examples to use as a guideline.
 
 ### Goals / Non-Goals
 
