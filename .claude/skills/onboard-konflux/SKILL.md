@@ -56,7 +56,7 @@ Use `AskUserQuestion` to collect these details (skip questions where the user al
 
 ### Required
 - **App name**: The Konflux application/component name. Must be DNS-1123 compliant (lowercase, alphanumeric, hyphens). Convention: prefix with the project name if the binary name is generic (e.g., `gecko-platform-api-server`, not just `platform-api-server`).
-- **Source git repo URL**: The GitHub/GitLab repo URL (e.g., `https://github.com/openshift-online/gecko.git`)
+- **Source git repo URL**: The GitHub/GitLab repo URL (e.g., `https://github.com/openshift-online/gecko.git`). Validate it is a well-formed git URL (must start with `https://` or `git@` and end with a valid host/path) before using it in any templates.
 - **Git revision**: Branch to track (default: `main`)
 - **Containerfile path**: Path to the Containerfile/Dockerfile within the source repo, relative to repo root (e.g., `deploy/platform-api/Containerfile`)
 - **Build context**: Directory context for the container build, relative to repo root (default: `.`)
@@ -320,10 +320,10 @@ Add `imagerepository-for-<app-name>-image-pull` to the ServiceAccount's `secrets
 
 This is **critical** — CI will fail without this step.
 
-Run from the `tenants-config/` directory:
+Run from the repo's `tenants-config/` directory:
 
 ```bash
-./build-manifests.sh kustomize
+cd "<repo>/tenants-config" && ./build-manifests.sh kustomize
 ```
 
 This regenerates all files under `tenants-config/auto-generated/`. The new/modified files for our tenant will appear as untracked or modified in git.
@@ -376,7 +376,13 @@ If there are errors or the app name is missing, fix them before proceeding.
    git add tenants-config/auto-generated/cluster/kflux-prd-rh02/tenants/gcp-hcp-tenant/
    ```
 
-3. Commit with a descriptive message:
+3. Review the staged changes before committing:
+   ```bash
+   git diff --stat --staged
+   ```
+   Confirm the list of files looks correct — no unexpected auto-generated output.
+
+4. Commit with a descriptive message:
    ```
    Onboard <app-name> to gcp-hcp-tenant
 
@@ -384,7 +390,7 @@ If there are errors or the app name is missing, fix them before proceeding.
    and <GAR/Quay/GAR+Quay> ReleasePlan for <app-name>.
    ```
 
-4. Push and provide the MR creation URL.
+5. Push and provide the MR creation URL.
 
 ---
 
