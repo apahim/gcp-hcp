@@ -21,7 +21,7 @@ Ownership shifts across the workflow:
 | New, Refinement | **Reporter** — created the issue, drives socialization and information gathering |
 | Refinement (if offline work needed) | **Temporarily assigned person** — gathers information, then unassigns when done |
 | To Do | **Nobody** — item is ready and waiting to be picked up |
-| In Progress → Closed | **Assignee (DRI)** — the Directly Responsible Individual who drives delivery |
+| In Progress → Closed | **Assignee** — takes formal ownership when work begins and drives delivery through to close |
 
 The To Do state is intentionally unassigned. It means "sufficiently defined, ready for someone to
 start." The Assignee is set when work actually begins.
@@ -35,7 +35,7 @@ Three roles should be named on every Feature and Initiative, per HP-wide guidanc
 | Role | Who | When named | Jira field |
 |------|-----|-----------|-----------|
 | **Reporter** | Person who raised the issue | At creation | Reporter (system field) |
-| **Assignee (DRI)** | Engineer or engineering manager who drives delivery | When work begins (In Progress) | Assignee |
+| **Assignee** | Engineer who drives delivery | When work begins (In Progress) | Assignee |
 | **Architect** | Technical lead responsible for the architectural approach | During Refinement | Architect field |
 | **Product Manager** | Owns the product perspective — the "what and why" | During Refinement | Product Manager field |
 
@@ -147,7 +147,7 @@ proceed.
 
 **Definition:** Active execution is underway.
 
-**Who leads:** Assignee (DRI)
+**Who leads:** Assignee
 
 **Actions:**
 - Assignee takes formal ownership when picking up the work
@@ -172,7 +172,7 @@ proceed.
 
 **Definition:** Engineering work is complete. Validating that all acceptance criteria are met.
 
-**Who leads:** Assignee (DRI)
+**Who leads:** Assignee
 
 **Actions:**
 - Confirm all Acceptance Criteria have been satisfied
@@ -192,7 +192,7 @@ proceed.
 
 **Definition:** Work is complete, validated, and the issue is formally closed.
 
-**Who leads:** Assignee (DRI)
+**Who leads:** Assignee
 
 **Actions:**
 - Confirm all child Epics and Stories are Closed
@@ -212,15 +212,15 @@ proceed.
 
 Features and Initiatives decompose into Epics. Ownership works at two levels:
 
-| | Feature/Initiative Owner | Epic Owner |
-|--|--------------------------|-----------|
+| | Feature/Initiative Assignee | Epic Assignee |
+|--|----------------------------|--------------|
 | **Owns** | The outcome — why this matters, whether the ACs are met | The execution — how the work gets done within their Epic |
 | **Horizon** | Multi-milestone; coordinates across multiple Epics | Drives a focused slice of work to done |
-| **Primary concern** | Is the work moving? Are blockers cleared? Are stakeholders informed? | Is the Epic broken down well? Are Stories pointed and in progress? |
-| **Escalates to** | Engineering leadership, PM | Feature/Initiative owner |
+| **Primary concern** | Is the work moving? Are blockers cleared? Are stakeholders informed? | Is the Epic broken down well? Are Stories in progress? |
+| **Escalates to** | Engineering leadership, PM | Feature/Initiative Assignee |
 
-The Feature/Initiative owner may or may not own any Epics directly. They coordinate across Epic
-owners and are accountable for the outcome, not a substitute for them.
+The Feature/Initiative Assignee may or may not own any Epics directly. They coordinate across Epic
+Assignees and are accountable for the outcome, not a substitute for them.
 
 ---
 
