@@ -28,6 +28,23 @@ start." The Assignee is set when work actually begins.
 
 ---
 
+## Roles
+
+Three roles should be named on every Feature and Initiative, per HP-wide guidance:
+
+| Role | Who | When named | Jira field |
+|------|-----|-----------|-----------|
+| **Reporter** | Person who raised the issue | At creation | Reporter (system field) |
+| **Assignee (DRI)** | Engineer or engineering manager who drives delivery | When work begins (In Progress) | Assignee |
+| **Architect** | Technical lead responsible for the architectural approach | During Refinement | Architect field |
+| **Product Manager** | Owns the product perspective — the "what and why" | During Refinement | Product Manager field |
+
+> **Note:** If the GCP Jira project does not yet have the Architect or Product Manager fields,
+> submit a request to the Jira Admin team to have them added. These fields are part of the
+> HP-wide ownership model introduced in May 2026.
+
+---
+
 ## Feature vs. Initiative
 
 Both are Level 4 in the [hierarchy](jira-hierarchy.md) and follow the same workflow. The
@@ -75,11 +92,13 @@ proceed.
 **Who leads:** Reporter — or someone temporarily assigned to fill information gaps (see note below)
 
 **Actions:**
-- Present to the team in the monthly Feature/Initiative Refinement meeting
+- Present to the team in the Feature/Initiative Refinement meeting (held every three weeks)
 - Drive scoping discussions: what's in scope, what's explicitly out of scope
-- Clarify acceptance criteria (target: 3 or more specific, testable outcomes)
+- Clarify acceptance criteria — specific, testable outcomes
 - Identify at least one Epic that represents a first chunk of engineering breakdown
 - Confirm team buy-in and set Priority
+- Name an **Architect** in the Jira Architect field (the technical lead for this work)
+- Name a **Product Manager** in the Jira Product Manager field
 - For Features: determine Demo Critical status (Yes/No)
 - For Initiatives: fill in the Internal Impact section
 
@@ -91,10 +110,12 @@ proceed.
 **To move forward (Definition of Ready — trial adoption), ensure:**
 - [ ] Context and problem statement are clear
 - [ ] Scope is defined: what's included, what's not
-- [ ] At least 3 Acceptance Criteria documented
+- [ ] Acceptance Criteria are defined and specific
 - [ ] Priority set (not Undefined) — see [Priority Scheme](https://github.com/openshift-online/ai-helpers/blob/main/plugins/jira/reference/gcp-hcp.md)
 - [ ] At least one Epic identified for breakdown
 - [ ] Dependencies documented (blocking issues linked)
+- [ ] Architect named in Jira
+- [ ] Product Manager named in Jira
 - [ ] Team agrees to proceed
 - [ ] **Feature only:** Demo Critical set (Yes/No)
 - [ ] **Initiative only:** Internal Impact section completed
@@ -130,17 +151,12 @@ proceed.
 
 **Actions:**
 - Assignee takes formal ownership when picking up the work
-- Kick off delivery with the Architect and Epics owners
+- Coordinate with the Architect and Epic owners to align on approach, surface dependencies, and agree on first steps
 - Facilitate regular delivery check-ins
 - Clear blockers — escalate if needed
-- Post **bi-weekly Jira comments** with a brief status update (this is the primary stakeholder
-  communication channel; field updates alone don't count)
+- Post a brief status **Jira comment** at least every two weeks
 - Monitor child Epic progress; keep statuses current
 - Drive demos where applicable
-
-> The `updated` timestamp on a Jira issue changes whenever any field is edited. A status update
-> comment (even a one-liner) is the signal that a human has actively reviewed and communicated
-> progress. Post one at least every two weeks.
 
 **To remain in good standing, ensure:**
 - [ ] Assignee is set
@@ -199,12 +215,12 @@ Features and Initiatives decompose into Epics. Ownership works at two levels:
 | | Feature/Initiative Owner | Epic Owner |
 |--|--------------------------|-----------|
 | **Owns** | The outcome — why this matters, whether the ACs are met | The execution — how the work gets done within their Epic |
-| **Horizon** | Multi-milestone; coordinates across multiple Epics | 1–2 sprints; drives Stories to done |
+| **Horizon** | Multi-milestone; coordinates across multiple Epics | Drives a focused slice of work to done |
 | **Primary concern** | Is the work moving? Are blockers cleared? Are stakeholders informed? | Is the Epic broken down well? Are Stories pointed and in progress? |
 | **Escalates to** | Engineering leadership, PM | Feature/Initiative owner |
 
-The Feature/Initiative owner does not need to own any Epics directly. They coordinate across Epic
-owners, not substitute for them.
+The Feature/Initiative owner may or may not own any Epics directly. They coordinate across Epic
+owners and are accountable for the outcome, not a substitute for them.
 
 ---
 
