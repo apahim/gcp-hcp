@@ -92,7 +92,7 @@ proceed.
 **Who leads:** Reporter — or someone temporarily assigned to fill information gaps (see note below)
 
 **Actions:**
-- Present to the team in the Feature/Initiative Refinement meeting (held every three weeks)
+- Present to the team in the Feature/Initiative Refinement meeting (held every three weeks — see [Team Ceremonies Calendar](https://redhat.atlassian.net/wiki/spaces/GCP/pages/424214835/Team+Ceremonies+Calendar))
 - Drive scoping discussions: what's in scope, what's explicitly out of scope
 - Clarify acceptance criteria — specific, testable outcomes
 - Identify at least one Epic that represents a first chunk of engineering breakdown
