@@ -78,7 +78,7 @@ HCP Terraform workspaces that manage GCP infrastructure must authenticate via Wo
 * Federated OIDC tokens are short-lived (~1h) and scoped to the specific HCP Terraform run phase (plan or apply)
 * Workspace-scoped `attribute_condition` on the WIF provider restricts federation to workspaces within the configured TFC project — tighter than the org-wide condition used in Phase 1
 * No secrets stored in HCP Terraform — the token exchange uses the workspace's OIDC identity
-* Plan SA can be restricted to read-only roles on target projects, limiting blast radius during speculative plans
+* Plan and apply SAs start with unified roles on target projects so permission gaps surface at plan time. The plan SA can be restricted to read-only later if tighter speculative plan isolation is needed
 * Access project contains only WIF resources — compromising it does not expose infrastructure state or resources
 
 ### Operability:
@@ -137,21 +137,21 @@ Per Environment:
 
 GCP Projects:
 
-┌──────────────────────────────┐     ┌──────────────────────┐
-│ gcp-hcp-{env_abbrev}-tfc-access    │     │ gcp-hcp-{env}-global │
+┌─────────────────────────────────┐  ┌──────────────────────┐
+│ gcp-hcp-{env_abbrev}-tfc-access │  │ gcp-hcp-{env}-global │
 │                              │     │                      │
-│  • WIF pool                  │     │  • Infrastructure    │
-│  • OIDC provider             │     │  • Cross-project IAM │
-│  • Plan SA ─────── view ────────▶  │    for plan SA       │
-│  • Apply SA ──── write ─────────▶  │    for apply SA      │
-│                              │     │                      │
-└──────────────────────────────┘     └──────────────────────┘
+│  • WIF pool                   │  │  • Infrastructure    │
+│  • OIDC provider              │  │  • Cross-project IAM │
+│  • Plan SA ──── write ────────▶  │    for plan SA       │
+│  • Apply SA ── write ─────────▶  │    for apply SA      │
+│                               │  │                      │
+└─────────────────────────────────┘  └──────────────────────┘
          │          │                          │
          │          │                 ┌────────┴────────┐
          │          │                 ▼                 ▼
          │          │     ┌──────────────────┐ ┌──────────────────┐
          │          └────▶│ {env}-reg-*      │ │ {env}-mgt-*      │
-         └───── view ────▶│  • Cross-project │ │  • Cross-project │
+         └──── write ────▶│  • Cross-project │ │  • Cross-project │
                           │    IAM grants    │ │    IAM grants    │
                           └──────────────────┘ └──────────────────┘
 ```
@@ -212,10 +212,11 @@ The PagerDuty workspace uses a PagerDuty API key — no GCP IAM needed. It does 
 
 ### Resolved
 
-- **Access project creation and bootstrap credentials**: The access project and WIF resources are bootstrapped locally following the same pattern as environment setup ([gcp-hcp-infra SETUP.md](https://github.com/openshift-online/gcp-hcp-infra/blob/main/terraform/config/global/SETUP.md)). An operator runs `terraform apply` locally with their own `gcloud` credentials and a `TFE_TOKEN` to create the access GCP project, WIF pool, SAs, and TFC variable set in a single apply. State is then migrated to TFC (the access workspace takes over ongoing management). No static service account keys are needed. The operator needs folder-admin permissions (to create the project), `iam.workloadIdentityPoolAdmin` + `iam.serviceAccountAdmin` (for WIF resources), and a TFC API token (for variable set creation).
+- **Access project creation and bootstrap credentials**: The access project and WIF resources are bootstrapped locally following the same pattern as environment setup ([gcp-hcp-infra SETUP.md](https://github.com/openshift-online/gcp-hcp-infra/blob/main/terraform/config/global/SETUP.md)). An operator runs `terraform apply` locally with their own `gcloud` credentials and a `TFE_TOKEN` to create the access GCP project, WIF pool, SAs, and TFC variable set in a single apply. State is then migrated to TFC by uncommenting the `cloud {}` backend block and running `terraform init` (which prompts interactively for migration; the `-migrate-state` flag is not supported with the `cloud` backend). No static service account keys are needed. The operator needs `roles/resourcemanager.projectCreator` on the environment folder (to create the project; as project creator they become owner, so WIF and SA permissions are implicit) and a TFC API token (for variable set creation).
+- **TFC project must exist before bootstrap**: The `gcp-dynamic-creds` module uses `data "tfe_project"` to look up the target TFC project for variable set attachment. The TFC project (e.g., `gcp-hcp-integration`) must be created first via the infra-platform bootstrap module (`hcp-terraform/tenants/gcp-hcp/main.tf`) before running the access project apply.
 - **Circular dependency**: The local bootstrap sidesteps the circular dependency entirely — the first apply runs locally, not in a TFC workspace, so there is no workspace for `apply_to_all_workspaces` to poison. After state is migrated to TFC, the access workspace inherits its own variable set, but at that point the SAs already exist and the credentials are valid. If a future `terraform apply` on the access workspace partially fails (e.g., SA recreation), the same manual detach-and-reapply fix from the [experiment](../experiments/terraform-automation-tools/hcp-terraform-wif-playground.md) applies.
 
-- **Plan vs. apply role assignment**: The module creates separate plan and apply SAs with distinct roles. The plan SA gets view access on each target project (sufficient for `terraform plan`). The apply SA gets the full write role set (matching Atlantis). Cross-project IAM in each module's `tfc.tf` grants the appropriate roles to each SA separately. If the plan/apply split causes issues (e.g., `terraform plan` needing write-adjacent permissions), the module supports `use_apply_role_for_plan` ([infra-platform#119](https://github.com/openshift-online/infra-platform/pull/119)) to fall back to unified roles.
+- **Plan vs. apply role assignment**: The module creates separate plan and apply SAs. On the access project itself, roles are scoped to what the workspace needs to manage its own WIF resources: `roles/viewer`, `roles/iam.workloadIdentityPoolAdmin`, `roles/iam.serviceAccountAdmin`, `roles/resourcemanager.projectIamAdmin`, and `roles/serviceusage.serviceUsageAdmin`. Note that `projectIamAdmin` grants the access workspace authority to modify the access project's IAM policy. This is intentional: the `gcp-dynamic-creds` module creates `google_project_iam_member` bindings for the plan/apply SAs, and the workspace must be able to manage these after state migration to TFC. On target projects (global, region, MC), both the plan and apply SAs will start with the same role set (matching Atlantis). Using unified roles means permission gaps surface during `terraform plan` rather than only at apply time, catching issues earlier in the PR cycle. The module supports this via unified cross-project IAM grants in each module's `tfc.tf`. If we later want tighter plan isolation (e.g., restricting speculative plans to read-only), the module supports splitting roles via separate `plan_roles` and `apply_roles` in the cross-project IAM bindings.
 
 ### Future Considerations
 

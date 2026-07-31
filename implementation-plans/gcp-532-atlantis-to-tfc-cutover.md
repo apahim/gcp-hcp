@@ -6,7 +6,9 @@ Migrate infrastructure automation from self-hosted Atlantis to HCP Terraform Clo
 
 Integration environment first, then stage. Production does not have Atlantis today, so TFC will be the first automation there.
 
-**Jira**: [GCP-536](https://redhat.atlassian.net/browse/GCP-536)
+**Epic**: [GCP-532](https://redhat.atlassian.net/browse/GCP-532) - Terraform Cloud Evaluation & Plan
+
+**Spike**: [GCP-536](https://redhat.atlassian.net/browse/GCP-536) - Evaluate HCP Terraform for GCP-HCP Infrastructure
 
 **Design decision**: [hcp-terraform-workload-identity-federation](../design-decisions/automation/hcp-terraform-workload-identity-federation.md)
 
@@ -29,11 +31,62 @@ TFC Workspace (e.g., gcp-hcp-global-integration)
     │      attribute_condition scoped to TFC project
     │
     ├─ 3. STS returns federated token → exchanged for SA access token
-    │      Plan phase: plan SA (view access on target projects)
-    │      Apply phase: apply SA (write access on target projects)
+    │      Plan phase: plan SA (unified roles, same as apply)
+    │      Apply phase: apply SA (full write access on target projects)
     │
     └─ 4. SA token used for GCP API calls on target projects
 ```
+
+---
+
+## Spike Evaluation Summary
+
+Findings from the [GCP-536](https://redhat.atlassian.net/browse/GCP-536) spike mapped to each evaluation area. The design decision and experiment docs cover authentication in depth; this section captures the remaining areas.
+
+### 1. Workflow Fit
+
+TFC uses a VCS-driven workflow: push to a branch triggers a speculative plan, merge to main triggers an apply. This replaces Atlantis's PR-comment-driven model (`atlantis plan`, `atlantis apply`). Key differences:
+
+- **Plan triggers**: Automatic on PR push (no manual comment needed). Plans appear as GitHub check runs, not PR comments.
+- **Apply triggers**: Configurable per workspace. Auto-apply on merge to main, or require manual confirmation in the TFC UI. We will start with manual confirmation and evaluate auto-apply after validation (Story 5).
+- **Parallel operations**: TFC serializes standard plan/apply runs per workspace, but speculative plans (triggered by PR pushes) run concurrently and do not block the run queue. Multiple PRs touching the same workspace can generate speculative plans simultaneously. This differs from Atlantis, which serializes all operations per project including plans.
+- **Developer experience**: Plan output is in the TFC UI (linked from the GitHub check), not inline in the PR. This is a visibility tradeoff: richer UI with history and logs, but one click away from the PR.
+
+### 2. Authorization (RBAC)
+
+TFC supports team-based access control at the organization, project, and workspace level. Evaluation is deferred to production rollout (Story 8) where stricter approval gates matter. For integration and stage:
+
+- All team members (`gcp-hcp-eng`) have admin access on TFC projects (configured in infra-platform bootstrap)
+- Apply approval is manual in the TFC UI (any team member can confirm)
+- Sentinel/OPA policies enforce deletion protection (already configured via bootstrap module)
+- Production will require a more restrictive model (e.g., separate plan-only and apply-allowed teams)
+
+### 3. State Management
+
+TFC manages workspace state internally. New workspaces (like the access workspace) use the `cloud {}` backend from the start.
+
+For existing infrastructure currently managed by Atlantis (global, region, MC), state will migrate from GCS into TFC as part of the per-workspace cutover. Each workspace switches its backend from GCS to `cloud {}` and runs `terraform init` to migrate state into TFC. This is a one-time operation per workspace. After migration, TFC manages state natively and the GCS state bucket is no longer used for that workspace. Alternatively, infrastructure workspaces could be configured with the `cloud {}` backend from the start, bypassing GCS migration entirely. This approach will be evaluated during Story 4.
+
+### 4. Integration Points
+
+- **GitHub App**: TFC uses the org-level GitHub App configured in infra-platform bootstrap. No per-environment GitHub App needed (unlike Atlantis which requires one per environment).
+- **Pre-apply validation**: Atlantis uses `hack/check-pr-labels.sh` to validate PR labels before apply. TFC equivalent is run tasks or Sentinel policies. For the initial migration, this validation will be handled by the existing Prow CI checks which remain unchanged. A TFC-native replacement can be added later if needed.
+- **Drift detection**: TFC supports scheduled health assessments that detect configuration drift. Enabled per workspace via `assessments_enabled`. Will be evaluated during Story 5 validation but is not a migration blocker.
+- **OPA/Sentinel policies**: Deletion protection policy already enforced via the bootstrap module (`gcp-hcp-deletion-protection` policy set). Additional policies can be added incrementally.
+
+### 5. Operational Considerations
+
+- **Availability**: TFC is a managed SaaS with a [public status page](https://status.hashicorp.com) ([HCP SLA](https://portal.cloud.hashicorp.com/sla) explicitly excludes HCP Terraform). Removes the operational burden of running Atlantis on GKE (pod restarts, scaling, certificate renewal, Helm upgrades). If TFC is unavailable, no runs execute, but infrastructure is unaffected (same failure mode as Atlantis GKE downtime).
+- **Auditability**: TFC provides organization-scoped audit trails (retained 14 days via the Audit Trails API), plus per-workspace run history and state versions (retained for the lifetime of the workspace). GCP Cloud Audit Logs record all API calls made by the plan/apply SAs. For long-term audit retention beyond 14 days, log forwarding to an external system (e.g., Splunk) would be needed. This is still an improvement over Atlantis, which relies on GKE pod logs subject to cluster-level retention limits.
+- **Cost**: WIF and STS token exchanges are free. TFC workspace costs are governed by the organization plan (managed by infra-platform team). No additional GCP charges beyond the access project (which has no running resources).
+- **Fallback**: During the migration (Stories 1-5), Atlantis remains fully operational. TFC runs speculative plans only until validation is complete. Atlantis is not decommissioned until Story 9, after TFC is proven in all environments. If TFC does not work out, Atlantis continues as-is with no rollback needed.
+
+### 6. Migration Strategy
+
+- **Per-workspace cutover**: Atlantis and TFC are never active on the same workspace simultaneously. Each workspace is cut over individually: Atlantis autoplan is disabled for that workspace, then TFC takes over. During the migration period, some workspaces may still be on Atlantis while others have moved to TFC, but there is no overlap per workspace.
+- **Phased rollout**: Integration first (Stories 1-5), then stage (Story 7), then production (Story 8). Each environment is fully validated before the next begins.
+- **Rollback**: At any point before Story 9 (decommission), a workspace can be reverted to Atlantis: disable TFC auto-apply, cancel any in-flight runs, discard runs waiting for confirmation, wait for the workspace lock to clear, migrate state back to GCS, then re-enable Atlantis autoplan for that workspace.
+- **Order**: Lowest risk first. Integration has the fewest projects and the most tolerance for experimentation. Production is last and has no existing Atlantis to cut over from.
 
 ---
 
@@ -84,7 +137,7 @@ Create the dedicated access GCP project for integration, containing the WIF pool
 
 ### Summary
 
-Grant the plan SA view access and the apply SA write access on each target project (global, region, MC). This mirrors the existing `atlantis.tf` IAM pattern but with two SAs instead of one.
+Grant both the plan and apply SAs the full write role set on each target project (global, region, MC). Using unified roles means permission gaps surface during `terraform plan` rather than only at apply time. This mirrors the existing `atlantis.tf` IAM pattern but with two SAs instead of one.
 
 **Repo**: `gcp-hcp-infra`
 **Applied by**: Atlantis PR
@@ -98,16 +151,14 @@ Grant the plan SA view access and the apply SA write access on each target proje
     `container.admin`, `gkehub.admin`, `compute.networkAdmin`, `storage.admin`, `compute.instanceAdmin.v1`, `iam.serviceAccountAdmin`, `resourcemanager.projectIamAdmin`, `serviceusage.serviceUsageAdmin`, `compute.securityAdmin`, `dns.admin`, `secretmanager.admin`, `certificatemanager.editor`, `iap.admin`, `artifactregistry.admin`, `cloudbuild.builds.editor`, `logging.admin`, `iam.workloadIdentityPoolAdmin`, `monitoring.metricsScopesAdmin`, `monitoring.editor`
   - Apply SA — 3 folder-level roles (on `folders/{parent_folder_id}`):
     `resourcemanager.projectCreator`, `resourcemanager.folderAdmin`, `logging.configWriter`
-  - Plan SA — `roles/viewer` on the global project (minimum for speculative plans)
+  - Plan SA — same 19 project-level roles as apply SA (unified roles catch permission issues at plan time)
   - All resources gated by `var.enable_tfc`
 - [ ] Create `terraform/modules/region/tfc.tf`:
-  - Apply SA — 24 cross-project roles (same as `atlantis.tf`):
+  - Both SAs — 24 cross-project roles (same as `atlantis.tf`):
     `resourcemanager.projectIamAdmin`, `viewer`, `container.admin`, `compute.networkAdmin`, `storage.admin`, `compute.instanceAdmin.v1`, `iam.serviceAccountAdmin`, `iam.serviceAccountUser`, `serviceusage.serviceUsageAdmin`, `compute.securityAdmin`, `dns.admin`, `gkehub.admin`, `secretmanager.admin`, `workflows.admin`, `run.admin`, `pubsub.admin`, `eventarc.admin`, `resourcemanager.tagAdmin`, `resourcemanager.tagUser`, `privilegedaccessmanager.admin`, `storage.hmacKeyAdmin`, `bigquery.admin`, `artifactregistry.admin`, `monitoring.metricsScopesAdmin`
-  - Plan SA — `roles/viewer` on the region project
   - Same bootstrap pattern as `atlantis.tf` (project-creator impersonation for initial `projectIamAdmin`)
 - [ ] Create `terraform/modules/management-cluster/tfc.tf`:
-  - Apply SA — 20 cross-project roles (region minus: `gkehub.admin`, `storage.hmacKeyAdmin`, `bigquery.admin`, `artifactregistry.admin`)
-  - Plan SA — `roles/viewer` on the MC project
+  - Both SAs — 20 cross-project roles (region minus: `gkehub.admin`, `storage.hmacKeyAdmin`, `bigquery.admin`, `artifactregistry.admin`)
 - [ ] Enable in integration configs:
   - `terraform/config/global/integration/main/us-central1/main.tf`: `enable_tfc = true`, `tfc_plan_sa_email = "..."`, `tfc_apply_sa_email = "..."`
   - `terraform/config/region/integration/main/us-central1/main.tf`: same
@@ -117,8 +168,7 @@ Grant the plan SA view access and the apply SA write access on each target proje
 ### Acceptance Criteria
 
 - [ ] `terraform plan` shows IAM bindings for both plan and apply SAs on all target projects
-- [ ] After apply, plan SA can read resources in global/region/MC projects
-- [ ] After apply, apply SA can create/modify resources in global/region/MC projects
+- [ ] After apply, both plan and apply SAs can read and modify resources in global/region/MC projects
 
 ### Notes
 
