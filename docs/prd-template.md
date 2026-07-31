@@ -36,7 +36,7 @@ Describe the high-level proposed solution on how this will be implemented.
 
 ### User Experience
 
-Describe how customers will interact with this feature and use it. Describe the ROSA CLI, OCM UI, terraform interactions. Include a User Journey/Mapping diagram to help describe the user experience. Provide any example inputs and outputs and any industry-standard examples to use as a guideline.
+Describe how customers will interact with this feature and use it. Describe the ROSA CLI, OCM UI, Terraform interactions. Include a User Journey/Mapping diagram to help describe the user experience. Provide any example inputs and outputs and any industry-standard examples to use as a guideline.
 
 ### Goals / Non-Goals
 
@@ -85,7 +85,7 @@ Describe any new or existing service level objectives that will be affected by t
 
 | Supported Client | Supported? |
 | :---- | :---- |
-| GCP HCP CLI | N/A |
+| CLI | N/A |
 | Terraform | N/A |
 | CAPI | N/A |
 
@@ -129,7 +129,7 @@ Anybody may review the document and provide feedback.
 ## Approval
 
 To approve, carefully review the content for clarity, completeness, and alignment with project objectives; if it meets the criteria, provide formal approval, otherwise, highlight the concerns or gaps that need to be addressed before considering approval.
-An approval is required from each lead that represents teams involved in the feature. Typically this involves leads from OCM, OSDFM, SRE, QE, and Security.
+An approval is required from each lead that represents teams involved in the feature. Typically this involves leads from GCP HCP and Security.
 Please refer to the Stakeholders listed here for team information: [SD-ADR-0000: Template](https://docs.google.com/document/d/1oOEf5VdB8DiLfKc4JjG76CNgdpEF-PKVmcIesmaK1qc/edit#heading=h.gjkcfxvgtp0w)
 
 | Name | Role | Date | Status | Notes |
@@ -141,4 +141,4 @@ Please refer to the Stakeholders listed here for team information: [SD-ADR-0000:
 
 ## Competitive Analysis (optional)
 
-Describe if ARO Classic or ARO HCP has a similar capability (or limitation).
+Describe if other HCP offerings (ROSA HCP, ARO HCP) or GKE have a similar capability (or limitation).
