@@ -142,7 +142,7 @@ GCP Projects:
 │                              │     │                      │
 │  • WIF pool                   │  │  • Infrastructure    │
 │  • OIDC provider              │  │  • Cross-project IAM │
-│  • Plan SA ──── view ─────────▶  │    for plan SA       │
+│  • Plan SA ──── write ────────▶  │    for plan SA       │
 │  • Apply SA ── write ─────────▶  │    for apply SA      │
 │                               │  │                      │
 └─────────────────────────────────┘  └──────────────────────┘
@@ -151,7 +151,7 @@ GCP Projects:
          │          │                 ▼                 ▼
          │          │     ┌──────────────────┐ ┌──────────────────┐
          │          └────▶│ {env}-reg-*      │ │ {env}-mgt-*      │
-         └───── view ────▶│  • Cross-project │ │  • Cross-project │
+         └──── write ────▶│  • Cross-project │ │  • Cross-project │
                           │    IAM grants    │ │    IAM grants    │
                           └──────────────────┘ └──────────────────┘
 ```
