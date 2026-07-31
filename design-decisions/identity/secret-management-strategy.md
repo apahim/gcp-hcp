@@ -36,13 +36,13 @@ The GCP HCP platform requires a consistent, secure approach to managing secrets 
 * Clear separation of concerns: human access (Bitwarden), cloud storage (Secret Manager), K8s delivery (ESO)
 * Team-wide shared access to secrets via Rover-managed group, with audit trail
 * 2FA token management through Bitwarden for shared service accounts — Bitwarden stores TOTP seeds and generates time-based one-time passwords, so the team can share 2FA-protected service accounts (e.g., GitHub bot accounts) without passing codes through side channels
-* Granular IAM permissions per secret per namespace, following least privilege
+* Granular IAM permissions per secret per namespace, following least privilege (IAM bindings at the Secret Manager secret level, one value per secret)
 * Alignment with existing Workload Identity strategy — secrets are the exception, not the rule
 * No additional infrastructure to operate (all components are managed services or lightweight operators)
 
 ### Negative
 
-* Sync process between Bitwarden and Google Cloud Secret Manager is not yet automated — manual for now, automation TBD
+* Sync process between Bitwarden and Google Cloud Secret Manager is not yet automated — manual for now, automation TBD (see [GCP-946](https://redhat.atlassian.net/browse/GCP-946))
 * Three-layer architecture requires understanding of all components for troubleshooting
 * Bitwarden dependency on Red Hat IT for access provisioning and collection management
 * No single pane of glass for secret inventory across all layers
@@ -51,18 +51,18 @@ The GCP HCP platform requires a consistent, secure approach to managing secrets 
 
 ### Security:
 
-* Bitwarden access governed by Rover group `gcp-hcp-eng` (Note `@BW@`), Bitwarden collection "Gcp Hcp Eng"
+* Bitwarden access governed by Rover group `gcp-hcp-eng` (Note `@BW@`), Bitwarden collection "Gcp Hcp Eng". A single collection is appropriate while the team operates as one unit; splitting into per-class collections would only be warranted if the team itself splits into sub-teams with distinct access needs
 * Bitwarden provides encrypted storage, access auditing, and 2FA token management
 * Google Cloud Secret Manager provides encryption at rest, IAM-based access control, and Cloud Audit Logs
-* ESO SecretStores use namespaced service accounts with per-secret-key IAM bindings — no cluster-wide access
-* ClusterSecretStores explicitly avoided to prevent cross-namespace secret leakage
+* ESO SecretStores must authenticate to Secret Manager via GKE Workload Identity Federation — `roles/secretmanager.secretAccessor` is granted directly to the Kubernetes service account principal (`principal://iam.googleapis.com/...`), with no intermediate Google service account. IAM bindings are scoped to specific Secret Manager secrets. Static service account JSON keys (`secretAccessKeySecretRef`) are prohibited. Independently authorized values must be stored as separate Secret Manager secrets, since IAM bindings apply at the secret level, not at individual payload fields within a secret
+* ClusterSecretStores explicitly avoided to prevent cross-namespace secret leakage. Creation of `ExternalSecret` resources should be restricted via RBAC to prevent unauthorized namespaces from referencing a SecretStore's identity
 * Secret rotation tracked per secret type in the platform secret inventory (maintained as a table in the team's internal documentation), recording rotation frequency, last rotation date, and responsible owner per secret; Workload Identity expansion reduces the tracked set over time
 
 ### Reliability:
 
 * **Scalability**: Bitwarden and Secret Manager scale independently; ESO handles reconciliation per namespace
 * **Observability**: Cloud Audit Logs for Secret Manager access; ESO metrics and events for sync status; Bitwarden access logs via Red Hat IT
-* **Resiliency**: Secret Manager provides regional replication; ESO reconciles on failure; in emergency scenarios (GCP outage, Secret Manager unavailable), team members with Bitwarden desktop/mobile app retain cached read access to secrets for manual intervention — this is a break-glass fallback, not a standard operating procedure
+* **Resiliency**: Secret Manager secrets use automatic replication (multi-region) by default. Secrets with data residency requirements (if any) must use user-managed replication with explicitly approved locations, consistent with the [regional-independence architecture](../infrastructure/regional-independence-architecture.md). ESO reconciles on failure. In emergency scenarios (GCP outage, Secret Manager unavailable), team members with Bitwarden desktop/mobile app retain cached read access to secrets for manual intervention — this is a break-glass fallback, not a standard operating procedure
 
 ### Cost:
 
@@ -74,7 +74,7 @@ The GCP HCP platform requires a consistent, secure approach to managing secrets 
 
 * New secrets follow a documented flow: create in Bitwarden, add to Secret Manager in target project, configure ESO SecretStore and ExternalSecret manifests
 * ESO SecretStore per namespace with dedicated service account reduces blast radius of misconfigurations
-* Runbook needed for secret rotation procedures and emergency access scenarios
+* Runbook needed for secret rotation procedures and emergency access scenarios (see [GCP-946](https://redhat.atlassian.net/browse/GCP-946))
 * Team onboarding requires Rover group membership for Bitwarden access
 
 ---
