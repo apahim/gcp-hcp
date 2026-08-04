@@ -2,7 +2,34 @@
 
 Tracking document for everything needed to promote GCP from `TechPreviewNoUpgrade` to GA.
 
-Last updated: 2026-07-31.
+Last updated: 2026-08-04.
+
+---
+
+## Jira Ticket Mapping
+
+| Section | Checklist Items | Jira Ticket | Parent Epic |
+|---------|----------------|-------------|-------------|
+| 1. API & Feature Gate | 1.1–1.4 | GCP-957 | GCP-451 |
+| 2. KMS / Secret Encryption (API) | 2.1, 2.2, 2.6 | GCP-962 | GCP-506 |
+| 2. KMS / Secret Encryption (Provider) | 2.3–2.5, 2.7 | GCP-963 | GCP-506 |
+| 3. Guest Credentials (Webhook) | 3.1 | GCP-967 | GCP-955 |
+| 3. Guest Credentials (CSI) | 3.2, 3.4 | GCP-968 | GCP-955 |
+| 3. Guest Credentials (Ingress SA) | 3.3 | GCP-961 | GCP-314 |
+| 4. CSI / Storage | 4.1–4.5 | GCP-958 | GCP-322 |
+| 5. Cluster Lifecycle | 5.1–5.4 | GCP-503, GCP-507 | GCP-502 |
+| 6. Monitoring & Alerting | 6.1–6.3 | GCP-959 | GCP-451 |
+| 7. Testing — Unit & CEL | 7.1, 7.3, 7.5 | GCP-960 | GCP-451 |
+| 8. Testing — E2E (PlatformConfig) | 8.1, 8.2, 8.5, 8.7 | GCP-964 | GCP-509 |
+| 8. Testing — E2E (Platform tests) | 8.4, 8.6 | GCP-965 | GCP-509 |
+| 9. CI | 9.1, 9.2 | GCP-966 | GCP-509 |
+| 10. Documentation (Operator guides) | 10.1–10.4 | GCP-969 | GCP-956 |
+| 10. Documentation (Reference) | 10.5, 10.6 | GCP-970 | GCP-956 |
+| 11. OCP Release Payload (CSI creds) | 11.1, 11.3 | GCP-968 | GCP-955 |
+| 11. OCP Release Payload (Ingress) | 11.2 | GCP-961 | GCP-314 |
+| 11. OCP Release Payload (CVO) | 11.4 | GCP-958 | GCP-322 |
+
+Items without dedicated tickets: 5.1–5.4 (covered by existing GCP-503/GCP-507), 6.4 (deferred), 6.5 (nice-to-have), 7.2 (folds into existing work), 7.4 (incremental), 8.3 (stretch), 8.8–8.9 (nice-to-have), 9.3 (no changes needed), 5.3–5.4 (inline fixes).
 
 ---
 
@@ -453,12 +480,37 @@ GCP uses a different mechanism than AWS/Azure:
 | Ingress | `openshift-ingress-operator` | IRSA | WI | **missing** |
 | CNCC | CP-side (token-minter) | CP token-minter | CP token-minter | CP token-minter |
 
-- [ ] **3.1 Evaluate GCP workload identity webhook**
+- [ ] **3.1 Implement GCP workload identity webhook**
+
+    **Decision (2026-08-04): Build a GCP workload identity webhook for GA,
+    following the AWS/Azure pattern (Option B).**
+
+    **Rationale:** Although GCP's WIF credential JSON (`service_account.json`)
+    is self-contained (it embeds the token file path in `credential_source.file`),
+    guest-side pods still need a **projected ServiceAccountToken volume** mounted
+    at that path (`/var/run/secrets/openshift/serviceaccount/token`). Without a
+    webhook to inject this volume, guest-side workloads (e.g., CSI node plugin
+    DaemonSet) cannot authenticate to GCP.
+
+    Today, CP-side pods get tokens via the token-minter sidecar, but guest-side
+    pods have no equivalent mechanism. Relying on the GCE instance metadata
+    server was considered and rejected because:
+    - **Security:** Any pod on the node can obtain the VM's SA token — a
+      privilege escalation vector (the exact problem GKE Workload Identity
+      was created to solve).
+    - **Scope limitations:** Default NodePool SA scopes (`devstorage.read_only`,
+      `logging.write`, `monitoring.write`) lack compute-related scopes the CSI
+      node plugin may need.
+    - **Proxy environments:** `no_proxy` at `support/proxy/no_proxy.go:36` does
+      not include `169.254.169.254` for GCP (only AWS/Azure), so metadata
+      requests would be proxied and fail.
+    - **No parity:** Azure explicitly uses WIF for both controller and node CSI
+      SAs (`cmd/infra/azure/identities.go:188-209`), not VM-level identity.
 
     AWS deploys `aws-pod-identity-webhook` (`reconcileAWSIdentityWebhook` at
     `resources.go:2606`) as a KAS sidecar (`kas/deployment.go:341`,
     `applyAWSPodIdentityWebhookContainer`) that intercepts Pod creates and
-    injects STS token env vars and projected SA token volumes.
+    injects projected SA token volumes + `AWS_WEB_IDENTITY_TOKEN_FILE` env var.
 
     Azure deploys `azure-workload-identity-webhook` (`reconcileAzureIdentityWebhook`
     at `resources.go:2669`) as a KAS sidecar (`kas/deployment.go:395`,
@@ -475,17 +527,47 @@ GCP uses a different mechanism than AWS/Azure:
     ```
     There is no `case hyperv1.GCPPlatform`.
 
-    **Assessment: likely NOT needed.** GCP's WIF uses static credential files
-    (`service_account.json`) that already contain the token file path reference.
-    AWS/Azure need webhooks because their credential mechanisms require dynamic
-    volume and env var injection at pod admission time. GCP's credential JSON is
-    self-contained — the Google Cloud SDK reads the token path from the JSON and
-    handles the STS exchange internally. A webhook would only be needed if
-    guest-side user workloads (not CP-hosted operands) need WIF tokens injected,
-    which is not the current architecture.
+    **Implementation (following the AWS/Azure pattern):**
 
-    **Decision required:** Confirm this is not needed for GA and document the
-    architectural difference.
+    1. **KAS sidecar** — Add `gcp-workload-identity-webhook` container to the
+       KAS deployment (`kas/deployment.go`). The webhook intercepts Pod creates
+       in the guest cluster and injects:
+       - A projected ServiceAccountToken volume with the WIF audience
+       - `GOOGLE_APPLICATION_CREDENTIALS` env var pointing to the credential
+         file path
+
+    2. **Guest-side webhook registration** — Create
+       `reconcileGCPIdentityWebhook()` in HCCO (`resources.go`) to register a
+       `MutatingWebhookConfiguration` + RBAC in the guest cluster (following
+       `reconcileAWSIdentityWebhook` at `resources.go:2606` and
+       `reconcileAzureIdentityWebhook` at `resources.go:2669`)
+
+    3. **Add `case hyperv1.GCPPlatform:`** to
+       `reconcilePlatformSpecificResources()` at `resources.go:545`
+
+    4. **Add WIF bindings for node-side SAs** in
+       `cmd/infra/gcp/iam-bindings.json` — currently only
+       `gcp-pd-csi-driver-controller-sa` is bound. Add bindings for node SAs
+       (e.g., `gcp-pd-csi-driver-node-sa`) following the Azure pattern in
+       `cmd/infra/azure/identities.go:188-209`
+
+    5. **Webhook binary/image** — Source or build a GCP workload identity
+       webhook binary. Evaluate whether an existing open-source implementation
+       can be reused or whether a new one must be written. Add the image to
+       the OCP release payload.
+
+    **Parity matrix after implementation:**
+
+    | Piece | AWS | Azure | GCP |
+    |-------|-----|-------|-----|
+    | KAS sidecar webhook | `aws-pod-identity-webhook` | `azure-workload-identity-webhook` | `gcp-workload-identity-webhook` |
+    | Token injection | Projected SA token + `AWS_WEB_IDENTITY_TOKEN_FILE` | Projected SA token + `AZURE_FEDERATED_TOKEN_FILE` | Projected SA token + `GOOGLE_APPLICATION_CREDENTIALS` |
+    | Guest credential secrets | HCCO per-operand secrets | HCCO per-operand secrets | HCCO per-operand secrets |
+    | Node SA WIF bindings | IRSA for controller + node | Federated creds for controller + node | WIF for controller + node |
+
+    **Cross-references:** Items 3.2 (CSI guest credential), 3.3 (ingress SA),
+    11.1 (storage credential), 11.2 (ingress credential) all depend on this
+    webhook being in place for guest-side pods to authenticate.
 
 - [ ] **3.2 Add storage/CSI guest-side credential**
 
@@ -502,33 +584,63 @@ GCP uses a different mechanism than AWS/Azure:
     **Cross-reference:** This also needs the `ClusterCSIDriver` registration in
     item 3.4.
 
-- [ ] **3.3 Evaluate dedicated ingress service account**
+- [ ] **3.3 Add dedicated ingress service account**
 
-    `GCPServiceAccountsEmails` defines six SAs (`gcp.go:272`): NodePool,
-    ControlPlane, CloudController, Storage, ImageRegistry, Network. There is
-    **no Ingress SA**.
+    **Decision (2026-08-04): Add a dedicated `Ingress` SA to
+    `GCPServiceAccountsEmails`, following the AWS/Azure pattern.**
 
-    AWS has `IngressARN`, Azure has an `Ingress` WorkloadIdentity clientID.
-    GCP's ingress operator currently uses the ControlPlane SA's token through
-    token-minter (`v2/ingressoperator/component.go:74`, which injects a
-    `cloud-token-minter` sidecar). This means the ingress operator has the
-    same GCP API permissions as the control plane SA — potentially
-    over-privileged.
+    **Rationale:** The ingress operator currently reuses the ControlPlane SA
+    (`ctrlplane-op`), which has `roles/dns.admin`, `roles/compute.networkAdmin`,
+    and `roles/compute.viewer`. The ingress operator only needs DNS management
+    (`roles/dns.admin`) and possibly LB state reads (`roles/compute.viewer`).
+    Granting `roles/compute.networkAdmin` to the ingress operator violates
+    least-privilege. AWS and Azure both have dedicated ingress identities with
+    scoped permissions (AWS: `route53:ChangeResourceRecordSets` +
+    `elasticloadbalancing:DescribeLoadBalancers`; Azure: custom ingress role
+    scoped to the DNS zone RG).
 
-    AWS creates `cloud-credentials` in `openshift-ingress-operator`
-    (resources.go:2163). Azure creates the same (azure.go SetupOperandCredentials).
-    GCP creates **nothing**.
+    Additionally, token-minter at `v2/ingressoperator/component.go:74` already
+    mints a cloud token for `openshift-ingress-operator/ingress-operator`, but
+    no GCP SA has a WIF binding for that K8s SA — so the STS exchange currently
+    fails silently.
 
-    **Decision required:** Determine whether GCP needs:
-    - (a) A new `Ingress` SA in `GCPServiceAccountsEmails` with scoped
-      permissions (e.g., `roles/dns.admin` for Cloud DNS, `roles/compute.loadBalancerAdmin`
-      for LB management), plus a credential Secret in the guest namespace
-    - (b) Continue reusing the ControlPlane SA (simpler, but violates
-      least-privilege)
+    No backward compatibility needed — GCP is not GA yet.
 
-    Adding a new SA is an API change (new field in `GCPServiceAccountsEmails`)
-    and a CLI change (IAM creation must provision the SA). If added, it should
-    be `+optional` since existing clusters won't have it.
+    **Implementation:**
+
+    1. **API change** — Add `Ingress` field to `GCPServiceAccountsEmails` in
+       `api/hypershift/v1beta1/gcp.go` (after the existing six SAs: NodePool,
+       ControlPlane, CloudController, Storage, ImageRegistry, Network)
+
+    2. **IAM roles** — Create an `ingress-op` GSA in
+       `cmd/infra/gcp/iam-bindings.json` with:
+       - `roles/dns.admin` (Cloud DNS record management for `*.apps.<domain>`)
+       - `roles/compute.viewer` (read LB state to determine ingress IP)
+
+    3. **WIF binding** — Bind the new GSA to K8s SA
+       `openshift-ingress-operator/ingress-operator` in `iam-bindings.json`
+
+    4. **CLI IAM creation** — Update `cmd/infra/gcp/create_iam.go` to
+       provision the new Ingress GSA with the roles above
+
+    5. **CP-side credential** — Update `ReconcileCredentials` in
+       `hypershift-operator/controllers/hostedcluster/internal/platform/gcp/gcp.go`
+       to create an ingress credential Secret in the CP namespace using the
+       `Ingress` SA email (following the existing pattern for other SAs)
+
+    6. **Guest-side credential** — Add `GCPIngressCloudCredsSecret()` to
+       `manifests/creds.go` targeting
+       `openshift-ingress-operator/cloud-credentials`, and add a
+       `gcpCredentialConfig` entry to `SetupOperandCredentials()` in
+       `gcp/gcp.go` using the `Ingress` SA email
+
+    7. **Token-minter update** — Update `ingressoperator/component.go` to
+       use the new `Ingress` SA for token minting instead of falling through
+       to the ControlPlane SA
+
+    **Cross-references:** Item 3.1 (workload identity webhook) provides the
+    projected SA token volume for guest-side pods. Item 11.2 (ingress
+    credential) is superseded by step 6 above.
 
 - [ ] **3.4 Register `GCPPDCSIDriver` in HCCO**
 
@@ -917,33 +1029,29 @@ the condition tracking, not in raw metric instrumentation.
     AWS today. Adding GCP vCPU counting from machine type specs would be
     a nice-to-have.
 
-- [ ] **6.4 Evaluate SLO support on GKE management clusters**
+- [ ] **6.4 ~~Evaluate~~ SLO support on GKE management clusters — deferred**
 
-    **File:** `test/e2e/e2e_test.go:279`
+    **Decision (2026-08-04): Accept the current limitation and align with
+    Azure. SLO alerting on GKE management clusters is out of scope for GA.**
 
-    SLO alerting is explicitly skipped for GCP:
+    **Rationale:** This is a management cluster infrastructure issue, not a
+    GCP guest platform issue. Azure has the same skip. GKE management
+    clusters lack OpenShift monitoring (`prometheus-k8s` in
+    `openshift-monitoring`), which `alertSLOs()` at `e2e_test.go:279`
+    depends on. Deploying standalone Prometheus on GKE or integrating GCP
+    Cloud Monitoring would be significant work with no parity precedent
+    (Azure hasn't done it either).
+
+    **Current state (no change needed):**
     ```go
     if globalOpts.Platform == hyperv1.GCPPlatform {
         return fmt.Errorf("Alerting SLOs is not supported on GCP")
     }
     ```
 
-    The reason: GKE management clusters don't have OpenShift monitoring
-    (`prometheus-k8s` service in `openshift-monitoring`). The `alertSLOs()`
-    function connects to this service to query firing SLO alerts.
-
-    The SLO alert itself (`cmd/install/assets/slos/hypershift.yaml`) is a
-    PrometheusRule for `HypershiftSLOTimeToAvailability`. It's
-    platform-agnostic but requires a Prometheus instance to evaluate it.
-
-    **Options:**
-    - (a) Deploy standalone Prometheus on GKE for SLO evaluation
-    - (b) Use GCP Cloud Monitoring as an alternative backend
-    - (c) Accept SLO alerting is an OCP management cluster feature and
-      document the limitation for GKE management clusters
-
-    **Note:** Azure SLO alerting is also skipped. This is a management
-    cluster infrastructure issue, not a GCP platform issue per se.
+    The SLO PrometheusRule (`cmd/install/assets/slos/hypershift.yaml`) is
+    platform-agnostic and will work if/when GCP clusters are managed from
+    an OCP management cluster instead of GKE. No code changes required.
 
 - [ ] **6.5 Evaluate platform-specific alerting rules**
 
@@ -1538,34 +1646,14 @@ for CSI and ingress is straightforward.
 
 - [ ] **11.2 Add ingress guest-side credential**
 
-    **Decision needed:** Does the GCP ingress operator require a dedicated
-    cloud credential? AWS and Azure both create an ingress credential secret
-    (`AWSIngressCloudCredsSecret` at `creds.go:8`,
-    `AzureIngressCloudCredsSecret` at `creds.go:37`) targeting
-    `openshift-ingress-operator/cloud-credentials`.
+    **Decision (2026-08-04): Resolved — covered by item 3.3 (dedicated
+    Ingress SA), step 6.** A new `Ingress` SA will be added to
+    `GCPServiceAccountsEmails` with `roles/dns.admin` and
+    `roles/compute.viewer`. The guest-side credential
+    (`openshift-ingress-operator/cloud-credentials`) will be created by
+    HCCO's `SetupOperandCredentials()` using the `Ingress` SA email.
 
-    **API gap:** No `Ingress` SA exists in `GCPServiceAccountsEmails`
-    (`api/hypershift/v1beta1/gcp.go:270-377`). The 6 existing SAs are:
-    `NodePool`, `ControlPlane`, `CloudController`, `Storage`,
-    `ImageRegistry`, `Network`. If an ingress credential is needed, options:
-
-    1. **Add a new `Ingress` SA field** to `GCPServiceAccountsEmails` (API
-       change — requires `make api`, CRD regeneration, and IAM tooling
-       update in `cmd/infra/gcp/`)
-    2. **Reuse the `Network` SA** — the CNCC already has
-       `compute.networkUser` which may suffice for DNS-based ingress
-    3. **Determine if GCP ingress operates without cloud credentials** —
-       if the ingress operator doesn't make GCP API calls, no credential
-       is needed
-
-    **Files to modify (if option 1):**
-    - `api/hypershift/v1beta1/gcp.go` — add `Ingress` field to
-      `GCPServiceAccountsEmails`
-    - `manifests/creds.go` — add `GCPIngressCloudCredsSecret()`
-    - `gcp/gcp.go` — add config entry with capability gate
-      `capabilities.IsIngressCapabilityEnabled`
-    - `cmd/infra/gcp/create_iam.go` — create the Ingress GSA with
-      appropriate roles
+    See item 3.3 for full implementation details.
 
 - [ ] **11.3 Register `GCPPDCSIDriver` in HCCO `reconcileStorage`**
 
