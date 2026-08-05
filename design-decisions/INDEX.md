@@ -80,3 +80,4 @@ Decision records organized by topic. Use [TEMPLATE.md](TEMPLATE.md) when adding 
 | [adopt-cincinnati-for-version-resolution](governance/adopt-cincinnati-for-version-resolution.md) | Replace hardcoded release image with Cincinnati update service for version resolution |
 | [platform-api](governance/platform-api.md) | Platform API server as single source of truth for CLM API definition |
 | [gecko-graduation](governance/gecko-graduation.md) | Graduate Platform API experiment to dedicated gecko repository |
+| [kube-applier-gcp-graduation](governance/kube-applier-gcp-graduation.md) | Graduate kube-applier-gcp experiment to dedicated repository |
