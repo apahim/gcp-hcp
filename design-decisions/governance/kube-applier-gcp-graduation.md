@@ -13,7 +13,6 @@ Graduate the kube-applier-gcp experiment (currently at `gcp-hcp/experiments/kube
 The kube-applier-gcp is a per-management-cluster controller that runs on GKE and brokers between Google Cloud Firestore and the local Kubernetes API server. It reads `ApplyDesire`, `DeleteDesire`, and `ReadDesire` documents from Firestore and reconciles them against the cluster. The experiment has grown into a well-structured Go project with its own dependency management, controller framework, informers, integration tests, and container build tooling.
 
 - **Problem Statement**: The experiment has outgrown its home in `gcp-hcp/experiments/`. With ~7,600 lines of Go code, its own `go.mod` dependency management, and a fundamentally different CI/CD pipeline (Go builds, Firestore emulator integration tests, container image publishing), it needs a dedicated repository to support independent releases, proper CI/CD, and clear ownership.
-- **Constraints**: The repository must be provisioned under the `openshift-online` org following the same process used for Gecko (GCP-913).
 - **Assumptions**: The GCP HCP team has the Go expertise to maintain the controller. The PoC demonstrates readiness for continued development.
 
 ## Alternatives Considered
@@ -22,11 +21,17 @@ The kube-applier-gcp is a per-management-cluster controller that runs on GKE and
 
 2. **Co-locate in `gcp-hcp`**: Keep the controller source inside the project hub repository. Avoids a new repository, but mixes Go source with documentation, imposes documentation-oriented CI/CD on a controller project, and contradicts the repository placement guide which directs graduated tooling/services to dedicated repositories.
 
+3. **Co-locate in `openshift-online/gecko`**: Place kube-applier-gcp alongside the Platform API server in the gecko repository. Reduces the number of repositories but conflates two components that operate at different tiers of the GCP HCP architecture and serve fundamentally different roles:
+   - **Different system tiers**: gecko runs on the regional cluster (once per region); kube-applier-gcp runs on every management cluster (N instances per region). Coupling them in a single repository binds components that operate at completely different levels of the system topology.
+   - **API layer vs. execution layer**: gecko defines and manages the platform API surface; kube-applier-gcp executes desired state against the cluster. Co-locating them would conflate two distinct architectural layers that the Firestore transport boundary is specifically designed to separate.
+   - **Independent release lifecycles**: a critical bug in the MC agent would force a gecko release and vice versa, coupling the blast radius of two independently operated components.
+   - **Organizational flexibility**: the Firestore transport layer provides a clean interface boundary between the two components. That boundary means a sub-division of the GCP HCP team (e.g., one focused on cluster lifecycle or agent infrastructure) could own kube-applier-gcp independently. Co-locating in gecko would artificially constrain that flexibility by coupling OWNERS, CI/CD, and release responsibilities.
+
 ## Decision Rationale
 
 * **Justification**: A dedicated repository satisfies all four graduation criteria and aligns with the repository organization policy's placement guide for "Graduated tooling/services." The controller has a distinct release lifecycle (versioned container images) and a fundamentally different CI/CD pipeline (Go builds, Firestore emulator integration tests, container image publishing) than documentation linting.
 
-* **Comparison**: Co-locating in `gcp-hcp` (alternative 2) would impose documentation-oriented CI/CD on a controller project and make independent releases impractical.
+* **Comparison**: Co-locating in `gcp-hcp` (alternative 2) would impose documentation-oriented CI/CD on a controller project and make independent releases impractical. Co-locating in gecko (alternative 3) would couple two components that operate at different system tiers, conflate a clean architectural boundary, and constrain future ownership flexibility within the team.
 
 ## Graduation Criteria Assessment
 
