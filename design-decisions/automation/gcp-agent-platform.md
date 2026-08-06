@@ -50,13 +50,13 @@ This decision applies to hosted/production agents only. Local developer agents (
 
 * **Comparison**:
   - **Cloud Run** (alternative 2): Viable as general-purpose compute. Some Agent Platform services (Sessions, Memory Bank) can be used from Cloud Run through integration, but orchestration, framework-aware deployment, and observability would need to be built and maintained by the team. For a small team, the build-vs-buy calculus strongly favors the managed platform. Cloud Run also lacks the inherent sandbox properties — a container image on Cloud Run can include a shell and writable filesystem unless explicitly hardened.
-  - **OpenShell on GKE** (alternative 3): Provides the strongest isolation model (kernel-level enforcement, credential proxy injection), but requires operating a standard GKE cluster. The team runs GKE Autopilot exclusively and has no standard GKE clusters. Standing up and maintaining the OpenShell infrastructure (cluster, sidecars, proxy) would be a significant operational burden for a platform that Google already manages. Agent Platform achieves equivalent security outcomes through different mechanisms at each layer.
+  - **OpenShell on GKE** (alternative 3): Provides the strongest isolation model (kernel-level enforcement, credential proxy injection), but requires operating a standard GKE cluster. The team runs GKE Autopilot exclusively and has no standard GKE clusters. Standing up and maintaining the OpenShell infrastructure (cluster, sidecars, proxy) would be a significant operational burden for a platform that Google already manages. For approved source-archive deployments, Agent Platform meets the controls defined in this decision through different mechanisms; it does not provide OpenShell's kernel-level isolation or credential-proxy guarantees.
 
 ## Consequences
 
 ### Positive
 
-* Zero operational overhead for agent infrastructure — Google manages compute, scaling, container lifecycle, and platform updates
+* No cluster operations for agent infrastructure — Google manages compute, scaling, container lifecycle, and platform updates; VPC, Secure Web Proxy, IAM, and scheduler provisioning remains required
 * Built-in sandbox properties in source-archive mode: no shell, no exec, no writable filesystem, read-only deployment
 * Workload Identity eliminates model API keys from the environment; tool credentials in Secret Manager with per-secret IAM
 * Native observability: Cloud Trace (OpenTelemetry), Cloud Logging, Cloud Monitoring. ADK agents get tracing via environment variable configuration; non-ADK agents require explicit OpenTelemetry instrumentation. Prompt/response capture is opt-in and requires data-handling review
@@ -86,7 +86,7 @@ ADK is the preferred framework for all new agents deployed on Agent Platform. Ke
 - **First-class Agent Runtime support**: `adk deploy agent_engine` handles packaging, container build, and deployment
 - **Portable**: ADK agents run anywhere Python (or Go/Java/TS) runs — local development, Cloud Run, GKE, or Agent Runtime
 
-Teams may use alternative frameworks (LangGraph, custom containers) if ADK does not fit their use case, but must document the justification and ensure the alternative integrates with Agent Runtime's deployment and observability stack.
+Teams may use alternative frameworks if ADK does not fit their use case, but must document the justification and ensure the alternative integrates with Agent Runtime's deployment and observability stack. Custom-container or non-source-archive deployments require separate security review and must preserve the controls in this decision.
 
 ### Agent Governance Toolkit (AGT) — Required for Write Access
 
