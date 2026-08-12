@@ -133,6 +133,7 @@ Key characteristics:
   ```yaml
   run_if_changed: '^terraform/(config/(global|region|management-cluster)/integration/|modules/|metadata/|workflows/|dashboards/)'
   ```
+- [ ] **Do not bypass Prow's trust gating for this job.** The job executes with `tfcloud-ci-secret`, which has access to workspace variables and state during the remote plan -- this is not a low-risk job to auto-run for untrusted authors. Confirm the presubmit uses Prow's default trust behavior: auto-runs for trusted authors (org members / previously-merged contributors) and requires an org member to comment `/ok-to-test` for first-time or external contributors before it runs on their PR. Do not set config (e.g. `skip_report` combined with permissive trust settings) that would let an untrusted fork PR trigger the job without that gate.
 
 **Acceptance Criteria**:
 - [ ] PR touching `terraform/config/global/integration/` triggers a speculative plan against `gcp-hcp-global-integration`
@@ -142,9 +143,11 @@ Key characteristics:
 - [ ] Plan does not perform state refresh (`-refresh=false`)
 - [ ] Plan does not block or interfere with in-flight promotion applies (speculative plans are read-only)
 - [ ] Job exits 0 with a message when no integration workspace is affected
+- [ ] A PR from a first-time/external contributor does not trigger the speculative plan until an org member (OWNERS) comments `/ok-to-test`
 
 **Design Notes**:
 - **Workspace discovery**: The script uses a static mapping from changed file paths to workspace names. Dynamic discovery via TFC API (list workspaces, match by `working_directory`) is a future enhancement to avoid config drift.
+- **Fork PR trust boundary**: Speculative plans execute remotely with access to workspace variables and state -- `Plan runs` permission is security-equivalent to `Write`, not a confidentiality boundary. Rely on Prow's standard org-member/`/ok-to-test` gating rather than any custom allow-list logic in the script itself.
 - **Which workspaces**: Only integration workspaces -- stage/production plans require separate credentials and are a future enhancement.
 - **Credential helper scoping**: The Git credential helper is scoped to `github.com` only. It rejects credential requests for other hosts to prevent a malicious Terraform module source from exfiltrating the GitHub token.
 - **Why CLI over TFC Runs API**: CLI remote execution is simpler (no tarball upload, no polling for run completion, no plan output parsing). TFC handles configuration version creation and execution automatically. The API approach (`POST /api/v2/runs` with `plan-only: true`, `refresh: false`) is documented as a fallback if CLI limitations are hit.
