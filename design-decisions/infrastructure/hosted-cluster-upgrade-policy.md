@@ -8,7 +8,7 @@
 
 Adopt mandatory platform-managed upgrades for hosted cluster control planes following the GKE model: control plane upgrades are automatic and cannot be disabled. Customers control timing of y-stream upgrades through maintenance windows, maintenance exclusions, and channel selection. Z-stream upgrades are fully automatic and do not respect delay controls.
 
-Node Pool upgrades are entirely customer-triggered — manual or scheduled — and always target the current control plane version. The platform does not automatically upgrade Node Pools.
+Node Pool upgrades are entirely customer-triggered — manual or scheduled. Customers can specify a target version for the Node Pool; the default is the current control plane version. The target version must be within the supported version skew (N-3 minor versions) and cannot exceed the current control plane version. The platform does not automatically upgrade Node Pools.
 
 ## Context
 
@@ -62,7 +62,7 @@ The platform tracks version skew between control plane and Node Pools:
 |---|---|---|
 | **Worker-to-control-plane skew** | Workers should not be more than **N-3 minor versions** behind the control plane | Platform notifies the customer as skew approaches the limit. If N-3 is exceeded, the Node Pool enters out-of-support status (no alerting, no Red Hat support until the Node Pool is upgraded) |
 | **Worker version ceiling** | Workers cannot run a version **newer** than the control plane | Platform blocks worker upgrades beyond the control plane version |
-| **Upgrade order** | Control plane upgrades **before** workers | Platform enforces this ordering — worker upgrades can only target the current control plane version |
+| **Upgrade order** | Control plane upgrades **before** workers | Platform enforces this ordering — worker upgrades can target any version up to and including the current control plane version |
 | **Minor version steps** | Minor version upgrades are sequential (e.g., 4.22 → 4.23 → 4.24, not 4.22 → 4.24) | Platform enforces single-step minor upgrades via Cincinnati upgrade graph |
 
 The specific out-of-support policy for Node Pools exceeding version skew will be documented separately.
@@ -98,11 +98,11 @@ The promotion flow:
 
 ### Node Pool Upgrades
 
-Node Pool upgrades are **entirely customer-triggered**. The target version is always the current control plane version.
+Node Pool upgrades are **entirely customer-triggered**. Customers can specify a target version; the default is the current control plane version. The target version must not exceed the control plane version and must be within the supported version skew (N-3).
 
 **Upgrade triggers:**
-- Manual: customer initiates upgrade to match the current control plane version
-- Scheduled: one-off scheduled upgrade to match the control plane version
+- Manual: customer initiates upgrade to a chosen version (default: current control plane version)
+- Scheduled: one-off scheduled upgrade to a chosen version (default: current control plane version)
 
 **Upgrade strategy — Replace (default):** Creates new machine instances with the target version and removes old ones in a rolling fashion. HyperShift uses CAPI MachineDeployments — when the NodePool version changes, CAPG creates new GCPMachine resources (new GCE instances), drains pods from old nodes, then deletes them.
 
@@ -168,8 +168,8 @@ Customer-defined blackout periods during which no automatic y-stream upgrades ar
 
 ## Customer Controls for Node Pool Upgrades
 
-- **Manual upgrade**: initiate upgrade to match current control plane version
-- **Scheduled upgrade**: one-off scheduled upgrade to match control plane version
+- **Manual upgrade**: initiate upgrade to a chosen version (default: current control plane version; must be within N-3 skew and not exceed the control plane version)
+- **Scheduled upgrade**: one-off scheduled upgrade to a chosen version (same constraints apply)
 - **View upgrade status**: monitor progress of an in-progress upgrade
 
 ### Customer Notifications
