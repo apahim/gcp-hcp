@@ -48,9 +48,10 @@ Findings from the [GCP-536](https://redhat.atlassian.net/browse/GCP-536) spike m
 TFC uses a VCS-driven workflow: push to a branch triggers a speculative plan, merge to main triggers an apply. This replaces Atlantis's PR-comment-driven model (`atlantis plan`, `atlantis apply`). Key differences:
 
 - **Plan triggers**: Automatic on PR push (no manual comment needed). Plans appear as GitHub check runs, not PR comments.
-- **Apply triggers**: Configurable per workspace. Auto-apply on merge to main, or require manual confirmation in the TFC UI. We will start with manual confirmation and evaluate auto-apply after validation (Story 5).
+- **Apply triggers**: Configurable per workspace. Auto-apply on merge to main, or require manual confirmation in the TFC UI. Workspaces start with `auto_apply = false` and are switched to `auto_apply = true` after validation (Story 5 cutover step).
 - **Parallel operations**: TFC serializes standard plan/apply runs per workspace, but speculative plans (triggered by PR pushes) run concurrently and do not block the run queue. Multiple PRs touching the same workspace can generate speculative plans simultaneously. This differs from Atlantis, which serializes all operations per project including plans.
 - **Developer experience**: Plan output is in the TFC UI (linked from the GitHub check), not inline in the PR. This is a visibility tradeoff: richer UI with history and logs, but one click away from the PR.
+- **Fork PRs**: TFC only runs speculative plans for PRs from branches on the upstream repo (`openshift-online/gcp-hcp-infra`), not from forks. Contributors working from forks will not see TFC plan output on their PRs. **Workaround**: push the branch directly to the upstream repo instead of opening a PR from a fork. This was discovered during [GCP-534](https://redhat.atlassian.net/browse/GCP-534) when the initial PR (#1069, from a fork) could not trigger TFC plans — it was closed and reopened as #1070 from an upstream branch.
 
 ### 2. Authorization (RBAC)
 
@@ -65,7 +66,36 @@ TFC supports team-based access control at the organization, project, and workspa
 
 TFC manages workspace state internally. New workspaces (like the access workspace) use the `cloud {}` backend from the start.
 
-For existing infrastructure currently managed by Atlantis (global, region, MC), state will migrate from GCS into TFC as part of the per-workspace cutover. Each workspace switches its backend from GCS to `cloud {}` and runs `terraform init` to migrate state into TFC. This is a one-time operation per workspace. After migration, TFC manages state natively and the GCS state bucket is no longer used for that workspace. Alternatively, infrastructure workspaces could be configured with the `cloud {}` backend from the start, bypassing GCS migration entirely. This approach will be evaluated during Story 4.
+For existing infrastructure currently managed by Atlantis (global, region, MC), state must be **seeded into TFC via the State Versions API** before the first plan. TFC remote execution mode ignores `backend "gcs"` blocks entirely — if a workspace is created without state, TFC sees zero resources and attempts to create everything from scratch. The `terraform init -migrate-state` approach does not work with remote execution mode because `init` runs locally but plans run remotely (where the GCS backend is inaccessible).
+
+**State seeding process** (per workspace, discovered during [GCP-534](https://redhat.atlassian.net/browse/GCP-534)):
+
+1. Freeze Atlantis for the workspace (disable the autoplan entry in `atlantis-{env}.yaml` or drain in-flight operations) to prevent state changes during the migration window
+2. Lock the TFC workspace (API or UI)
+3. Download the current state from GCS (`gsutil cp gs://{bucket}/{workspace}.tfstate .`)
+4. Upload the state to TFC via the [State Versions API](https://developer.hashicorp.com/terraform/cloud-docs/api-docs/state-versions): base64-encode the state JSON, compute its MD5 hash, POST to `/workspaces/{id}/state-versions`
+5. Verify the state in the TFC UI (resource count matches expectations)
+6. Unlock the workspace
+7. Securely delete the downloaded `.tfstate` file from the operator's workstation (it may contain sensitive resource attributes)
+
+After seeding, TFC manages state natively and the GCS state bucket is no longer used for that workspace.
+
+### API Activation and the `user_project_override` Pattern
+
+TFC authenticates via Workload Identity Federation (WIF) through a dedicated access project (`gcp-hcp-{env_abbrev}-tfc-access`). WIF authentication causes GCP to check API activation against the WIF pool's project (the access project), which only has identity-related APIs enabled (IAM, STS, IAM Credentials). Without mitigation, any cross-project API call fails with `"<API> has not been used in project <access-project-id> before or it is disabled"`.
+
+This was not a problem with Atlantis because Atlantis uses GKE Workload Identity (native SA auth), not WIF. With native SA auth, GCP checks API activation against the target project (the project in the resource URL), where the APIs are already enabled via `google_project_service` resources in each module.
+
+**Do not** enable all required APIs on the access project -- that would create an operational burden since the access workspace requires PAM-gated manual applies, and every new API added to any module would require repeating that process.
+
+**Solution**: Set `user_project_override = true` and `billing_project` pointing to the **global** project (e.g., `gcp-hcp-int-global`) in each workspace's `google` and `google-beta` provider blocks. The global project is used instead of the target project for two reasons:
+
+1. **Bootstrap chicken-and-egg**: During fresh region/MC provisioning, the target project does not exist yet when the first `terraform plan` runs. Pointing `billing_project` at a non-existent project would fail immediately.
+2. **IAM propagation delay**: Even after the target project is created, TFC SAs need `serviceUsageConsumer` on it to use it as a billing project. Granting this role and waiting for IAM propagation adds complexity and fragility to the bootstrap flow.
+
+The global project avoids both issues: it always exists and TFC SAs already have `serviceUsageConsumer` on it. The trade-off is that the global project must have all APIs enabled that region/MC modules call for quota attribution. Ten APIs were added to the global module's `activated_apis` in [PR #1114](https://github.com/openshift-online/gcp-hcp-infra/pull/1114): `aiplatform`, `endpoints`, `eventarc`, `eventarcpublishing`, `gkeconnect`, `privilegedaccessmanager`, `pubsub`, `run`, `sqladmin`, and `workflows`. These API enablements do not create resources or incur cost.
+
+Reference: [GCP Quota project overview](https://cloud.google.com/docs/quotas/quota-project) | [PR #1073](https://github.com/openshift-online/gcp-hcp-infra/pull/1073) | [PR #1114](https://github.com/openshift-online/gcp-hcp-infra/pull/1114) | [GCP-990](https://redhat.atlassian.net/browse/GCP-990)
 
 ### 4. Integration Points
 
@@ -121,6 +151,7 @@ Create the dedicated access GCP project for integration, containing the WIF pool
 - [ ] Register access workspace in meta workspace (`hcp-terraform/meta/main.tf` or equivalent) — workspace must exist before state migration
 - [ ] Uncomment `cloud {}` backend block
 - [ ] Run `terraform init -migrate-state` to migrate state to TFC
+  > Note: `terraform init -migrate-state` works here because the access workspace starts with **local** state (from the initial apply). Existing workspaces with GCS state (Story 4) require the State Versions API instead — see [State Management](#3-state-management).
 
 ### Acceptance Criteria
 
@@ -223,27 +254,55 @@ Create TFC workspaces mirroring the Atlantis projects in `atlantis-integration.y
 
   | TFC Workspace | Working Directory | Trigger Prefixes |
   |---|---|---|
-  | `gcp-hcp-global-integration` | `terraform/config/global/integration/main/us-central1` | `terraform/metadata/`, `terraform/dashboards/global/` |
-  | `gcp-hcp-region-int-main-us-central1` | `terraform/config/region/integration/main/us-central1` | `terraform/workflows/`, `terraform/metadata/` |
-  | `gcp-hcp-mc-int-main-us-central1-yjiv` | `terraform/config/management-cluster/integration/main/us-central1-yjiv` | `terraform/workflows/`, `terraform/metadata/` |
+  | `gcp-hcp-global-integration` | `terraform/config/global/integration/main/us-central1` | `terraform/metadata/`, `terraform/dashboards/global/`, `terraform/modules/global/` |
+  | `gcp-hcp-region-int-main-us-central1` | `terraform/config/region/integration/main/us-central1` | `terraform/workflows/`, `terraform/metadata/`, `terraform/modules/region/` |
+  | `gcp-hcp-mc-int-main-us-central1-yjiv` | `terraform/config/management-cluster/integration/main/us-central1-yjiv` | `terraform/workflows/`, `terraform/metadata/`, `terraform/modules/management-cluster/` |
 
+  > **Note**: Trigger prefixes must include shared module paths (`terraform/modules/{type}/`) so that changes to the module source trigger plans in dependent workspaces.
+
+- [ ] Create workspaces with `auto_apply = false` — auto-apply is enabled after validation (Story 5)
 - [ ] Create `hcp-terraform/gcp-hcp-int/cloud.tf` pointing at meta workspace
 - [ ] No `tfe_variable_set` or `tfe_variable` resources needed — module handles variable sets via `apply_to_all_workspaces`
 - [ ] Open PR, merge to main (meta workspace applies)
+- [ ] **Provider configuration** for each migrated workspace config -- update `google` and `google-beta` provider blocks **before** state seeding and the first speculative plan:
+  ```hcl
+  locals {
+    global_project_id = "gcp-hcp-${local.env_config.abbreviation}-global"
+  }
+
+  provider "google" {
+    billing_project       = local.global_project_id
+    user_project_override = true
+    default_labels        = local.common_labels
+  }
+  ```
+  This redirects GCP API activation checks to the global project, avoiding bootstrap issues with non-existent target projects (see [API Activation](#api-activation-and-the-user_project_override-pattern) above). The `global_project_id` local is derived from metadata because provider blocks cannot reference data sources. Both `google` and `google-beta` provider blocks must be updated, including any aliased providers. See [PR #1114](https://github.com/openshift-online/gcp-hcp-infra/pull/1114) for reference.
+- [ ] **State seeding** (per workspace, for workspaces with existing Atlantis-managed infrastructure):
+  1. Freeze Atlantis for the workspace: disable the autoplan entry in `atlantis-{env}.yaml` (or drain/cancel in-flight Atlantis operations) to prevent state changes during the migration window
+  2. Lock the TFC workspace via API
+  3. Download the current state from GCS: `gsutil cp gs://{state-bucket}/{workspace}.tfstate .`
+  4. Base64-encode the state JSON and compute its MD5 hash
+  5. Upload to TFC via the [State Versions API](https://developer.hashicorp.com/terraform/cloud-docs/api-docs/state-versions): `POST /workspaces/{id}/state-versions`
+  6. Verify in TFC UI that resource count matches the GCS state
+  7. Unlock the workspace
+  8. Run a speculative plan — it should show no changes (or only expected drift)
+  > **Important**: Atlantis must remain frozen from step 1 through the end of verification (step 8). An Atlantis apply between state download and TFC upload would leave TFC with a stale snapshot.
 
 ### Acceptance Criteria
 
 - [ ] Workspaces appear in `gcp-hcp-integration` TFC project
 - [ ] Each workspace has WIF variables inherited from the project-level variable set
-- [ ] Speculative plans run on PR pushes
+- [ ] Provider blocks include `user_project_override = true` and `billing_project` (merged before state seeding)
+- [ ] Each workspace with existing infrastructure has state seeded from GCS (resource count matches)
+- [ ] Speculative plans run on PR pushes (from upstream branches — not forks, see [Workflow Fit](#1-workflow-fit))
 
 ---
 
-## Story 5: Validation (Integration)
+## Story 5: Validation and Cutover (Integration)
 
 ### Summary
 
-Validate that TFC can manage the same infrastructure as Atlantis with the same outcomes.
+Validate that TFC can manage the same infrastructure as Atlantis with the same outcomes, then complete the cutover for each workspace.
 
 **Depends on**: Stories 2, 3, 4
 
@@ -251,15 +310,25 @@ Validate that TFC can manage the same infrastructure as Atlantis with the same o
 
 - [ ] **Plan comparison**: Run TFC plan on each workspace, compare with latest Atlantis plan — outputs should be identical (no-op or same diff)
 - [ ] **Small change test**: Apply a minor change (e.g., add a resource label) via TFC on one workspace
-- [ ] **State consistency**: Verify TFC reads the same GCS remote state as Atlantis
+- [ ] **State consistency**: Verify TFC-seeded state matches the GCS state (resource count, serial number)
 - [ ] **Cross-project operations**: Verify region workspace can create IAM bindings on the global project (via `modules/region/global-iam.tf`) — this is the key operation that validates the cross-project IAM grants
 - [ ] **Plan SA isolation**: Verify speculative plans succeed with view-only plan SA (no write operations attempted during plan)
+- [ ] **API activation**: Verify `user_project_override = true` resolves quota project errors — plans should not fail with "API has not been used in project" errors
+- [ ] **Cutover per workspace** (after validation passes):
+  1. Disable Atlantis autoplan for the workspace (remove entry from `atlantis-integration.yaml`)
+  2. Set `auto_apply = true` in the workspace definition (`hcp-terraform/gcp-hcp-int/main.tf`) so TFC auto-applies on merge to main, matching Atlantis behavior
+  3. Merge the `auto_apply` change — TFC applies it via the meta workspace
+  4. Verify the next merge-to-main triggers an automatic apply (no manual confirmation needed in TFC UI)
+- [ ] **Update Prow required status checks**: Remove Atlantis status checks (`atlantis-int/plan`, `atlantis-int/apply`) from the required checks on the `main` branch in [`openshift/release`](https://github.com/openshift/release/blob/main/core-services/prow/02_config/openshift-online/gcp-hcp-infra/_prowconfig.yaml). Without this, PRs to `gcp-hcp-infra` will be blocked because the removed Atlantis integration projects no longer report these statuses. Open a PR against `openshift/release` to update the Prow config. See [GCP-951](https://redhat.atlassian.net/browse/GCP-951).
 
 ### Acceptance Criteria
 
 - [ ] TFC plan output matches Atlantis for all integration workspaces
 - [ ] At least one apply completes successfully via TFC
 - [ ] Cross-project IAM operations work from region and MC workspaces
+- [ ] No "API has not been used in project" errors during plans or applies
+- [ ] Each validated workspace has `auto_apply = true` and its Atlantis autoplan entry removed
+- [ ] Prow required status checks updated to remove Atlantis checks for the cutover environment
 
 ---
 
@@ -335,6 +404,7 @@ Disable Atlantis and remove its infrastructure after TFC is validated in integra
 - [ ] Remove Atlantis Helm chart (`helm/charts/atlantis-stack/`)
 - [ ] Remove Atlantis SA and IAM bindings (`atlantis.tf` files in global/region/MC/commons modules)
 - [ ] Remove `atlantis-{env}.yaml` files
+- [ ] Remove all Atlantis required status checks from Prow config in [`openshift/release`](https://github.com/openshift/release/blob/main/core-services/prow/02_config/openshift-online/gcp-hcp-infra/_prowconfig.yaml) (per-environment checks should already be removed during Story 5/7/8 cutover; verify none remain)
 - [ ] Update mintmaker agent (`agent/mintmaker/tools/atlantis.py` → TFC equivalent)
 - [ ] Remove `enable_tfc` variable gates — TFC IAM becomes the only IAM
 
@@ -342,6 +412,7 @@ Disable Atlantis and remove its infrastructure after TFC is validated in integra
 
 - [ ] No Atlantis pods running in any environment
 - [ ] All `atlantis.tf` and `atlantis-iam.tf` files removed
+- [ ] No Atlantis-related Prow required status checks remain in `openshift/release`
 - [ ] All infrastructure changes flow through TFC
 
 ---
@@ -364,11 +435,16 @@ Stories 2 and 3 can run in parallel (both depend only on Story 1).
 | Risk | Mitigation |
 |---|---|
 | IAM propagation delay on new SA roles | Split SA creation (Story 1) from workspace creation (Story 4); allow ~60s between apply and first workspace run |
-| State file locking during parallel Atlantis + TFC | Only one system should apply at a time during validation; use TFC speculative plans |
+| State file locking during parallel Atlantis + TFC | Freeze Atlantis for the workspace before downloading GCS state for seeding; keep frozen through upload, verification, and cutover. Only one system should apply at a time |
 | Commons module requires SRE manual apply | Coordinate with SRE; include in phase sequencing |
 | Atlantis and TFC both triggering on same PR | Disable Atlantis autoplan for workspaces that TFC manages before enabling TFC |
 | Module upstream breakage | Pin to specific module version in TFC private registry; test upgrades in integration first |
 | Plan SA needs more than viewer for certain plans | If `terraform plan` fails with viewer-only, add specific read roles to plan SA — or use `use_apply_role_for_plan` ([infra-platform#119](https://github.com/openshift-online/infra-platform/pull/119)) to fall back to unified roles |
+| GCP API activation fails on access project (quota project mismatch) | Set `user_project_override = true` and `billing_project` in provider blocks to redirect activation checks to the global project. Global is used instead of the target project to avoid bootstrap chicken-and-egg issues. See [API Activation](#api-activation-and-the-user_project_override-pattern) |
+| TFC workspace created without state sees zero resources and tries to create everything | Seed state from GCS via the State Versions API **before** the first plan. See [State Management](#3-state-management) |
+| Fork PRs do not trigger TFC speculative plans | Contributors must push branches to the upstream repo, not open PRs from forks. Document in team onboarding |
+| Incomplete trigger prefixes miss shared module changes | Include shared module paths (`terraform/modules/{type}/`) in workspace trigger prefixes alongside config-specific paths |
+| Atlantis required status checks block PRs after cutover | Prow config in `openshift/release` defines `atlantis-{env}/plan` and `atlantis-{env}/apply` as required checks on `main`. After removing Atlantis projects, these checks never report, blocking all merges. Update Prow config per environment as part of the cutover (Story 5). PR against [`openshift/release`](https://github.com/openshift/release/blob/main/core-services/prow/02_config/openshift-online/gcp-hcp-infra/_prowconfig.yaml) |
 
 ## CI Workspaces (Deferred)
 
@@ -382,3 +458,18 @@ CI workspace migration will be planned separately after environment workspaces a
 ## PagerDuty
 
 PagerDuty uses a PagerDuty API key — no GCP IAM needed. Migrated to TFC as a standalone workspace in `gcp-hcp-tooling` with no WIF configuration.
+
+---
+
+## Migration Findings
+
+Workspace migrations uncovered several undocumented requirements. The first batch came from `gcp-hcp-global-integration` ([GCP-534](https://redhat.atlassian.net/browse/GCP-534), [PR #1070](https://github.com/openshift-online/gcp-hcp-infra/pull/1070)). Finding #6 was discovered during the region/MC integration cutover ([GCP-951](https://redhat.atlassian.net/browse/GCP-951)). These findings have been integrated into the stories above and are summarized here for reference.
+
+| # | Finding | Impact | Resolution | Reference |
+|---|---------|--------|------------|-----------|
+| 1 | TFC remote execution ignores `backend "gcs"` blocks — workspace starts with empty state | TFC sees zero resources, attempts to create all infrastructure from scratch | Seed state from GCS via State Versions API before first plan | [State Management](#3-state-management), Story 4 |
+| 2 | WIF authentication checks API activation against the access project (WIF pool's project), which lacks target-project APIs | Plans fail with "API has not been used in project" errors | Set `user_project_override = true` + `billing_project` pointing to global project (not target, to avoid bootstrap chicken-and-egg). 10 APIs added to global module in [PR #1114](https://github.com/openshift-online/gcp-hcp-infra/pull/1114) | [API Activation](#api-activation-and-the-user_project_override-pattern), [GCP-990](https://redhat.atlassian.net/browse/GCP-990), [PR #1073](https://github.com/openshift-online/gcp-hcp-infra/pull/1073), [PR #1114](https://github.com/openshift-online/gcp-hcp-infra/pull/1114) |
+| 3 | TFC does not run speculative plans on fork PRs | Contributors from forks get no plan feedback | Push branches to upstream repo | [Workflow Fit](#1-workflow-fit) |
+| 4 | Workspaces created with `auto_apply = false` need explicit enablement after cutover | Merges to main do not auto-apply until flag is set | Enable `auto_apply = true` per workspace after validation | Story 5, [GCP-951](https://redhat.atlassian.net/browse/GCP-951) |
+| 5 | Trigger prefixes missing shared module paths | Changes to shared modules do not trigger plans in dependent workspaces | Add `terraform/modules/{type}/` to trigger prefixes | Story 4 |
+| 6 | Prow required status checks reference Atlantis projects that no longer exist after cutover | PRs blocked from merging because `atlantis-{env}/plan` and `atlantis-{env}/apply` never report | Update Prow config in `openshift/release` to remove Atlantis checks per environment | Story 5, [GCP-951](https://redhat.atlassian.net/browse/GCP-951) |

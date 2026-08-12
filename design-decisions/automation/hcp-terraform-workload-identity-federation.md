@@ -70,6 +70,7 @@ HCP Terraform workspaces that manage GCP infrastructure must authenticate via Wo
 * Cross-project IAM grants (the bulk of the implementation) are still managed separately outside the module — the module only handles WIF plumbing within the access project
 * Plan/apply SA split creates two SA objects per environment regardless of whether roles differ
 * IAM propagation delay (~60s) after module apply means dependent workspaces may fail on first run
+* WIF authentication checks API activation against the access project (the WIF pool's project), not the target project -- every workspace must set `user_project_override = true` and `billing_project` (pointing to the global project) in its provider blocks to redirect these checks. The global project must have all APIs enabled that region/MC modules call ([GCP-990](https://redhat.atlassian.net/browse/GCP-990), [PR #1114](https://github.com/openshift-online/gcp-hcp-infra/pull/1114))
 
 ## Cross-Cutting Concerns
 
@@ -83,9 +84,11 @@ HCP Terraform workspaces that manage GCP infrastructure must authenticate via Wo
 
 ### Operability:
 
-* **Adding a new workspace**: Zero WIF configuration needed — workspace inherits credentials from the project-level variable set via `apply_to_all_workspaces`. Cross-project IAM for the apply SA must already be in place on the target project.
+* **Adding a new workspace**: Zero WIF configuration needed — workspace inherits credentials from the project-level variable set via `apply_to_all_workspaces`. Cross-project IAM for the apply SA must already be in place on the target project. The workspace config must include `user_project_override = true` and `billing_project` in provider blocks (see below).
 * **Adding a new environment**: Create access GCP project, create access workspace with bootstrap credentials, apply module, then create infrastructure workspaces. Grant cross-project IAM on each target project via `tfc.tf` files.
-* **Adding a new region**: `scripts/infra.py` generates config and adds a workspace entry. WIF credentials are inherited — no per-workspace config needed. Cross-project IAM grants for the new region project must be added to `modules/region/tfc.tf`.
+* **Adding a new region**: `scripts/infra.py` generates config and adds a workspace entry. WIF credentials are inherited automatically via the project-level variable set — no per-workspace WIF configuration needed. However, the workspace's `google` and `google-beta` provider blocks must still include `user_project_override = true` and `billing_project` (see provider configuration below). Cross-project IAM grants for the new region project must be added to `modules/region/tfc.tf`.
+* **Provider configuration (`user_project_override`)**: Because TFC SAs authenticate via WIF through a dedicated access project, GCP checks API activation against the access project (the WIF pool's project) by default. This fails because the access project only has WIF-related APIs enabled. Each workspace's `google` and `google-beta` provider blocks must set `user_project_override = true` and `billing_project` pointing to the **global** project (e.g., `gcp-hcp-int-global`). The global project is used instead of the target project because during fresh region/MC bootstrap the target project may not exist yet, and even after creation there is an IAM propagation delay before TFC SAs receive `serviceUsageConsumer` on it. The global project always exists and TFC SAs already have access. Trade-off: the global project must have all APIs enabled that region/MC modules call for quota attribution (10 APIs were added in [PR #1114](https://github.com/openshift-online/gcp-hcp-infra/pull/1114)). These API enablements do not create resources or incur cost. See [GCP Quota project overview](https://cloud.google.com/docs/quotas/quota-project). This is a direct consequence of the dedicated access project architecture. Note: Atlantis did not need this because its SA uses GKE Workload Identity (native SA auth), which checks API activation against the target project by default, not the SA's home project. Reference: [GCP-990](https://redhat.atlassian.net/browse/GCP-990), [PR #1114](https://github.com/openshift-online/gcp-hcp-infra/pull/1114).
+* **State seeding for existing workspaces**: TFC remote execution mode ignores `backend "gcs"` blocks. Migrating an existing workspace requires uploading the current GCS state to TFC via the [State Versions API](https://developer.hashicorp.com/terraform/cloud-docs/api-docs/state-versions) before the first plan. Without this, TFC sees zero resources and attempts to create everything.
 * **Debugging authentication failures**: Check the WIF provider attribute condition matches the TFC project name. Verify the module-created SAs have the required cross-project IAM bindings on target projects. Check for IAM propagation delay (~60s) on newly created bindings.
 * **Module updates**: Pin to a specific module version in the TFC private registry. Test version upgrades in integration before promoting to stage/production.
 
@@ -225,6 +228,7 @@ The PagerDuty workspace uses a PagerDuty API key — no GCP IAM needed. It does 
 
 ## References
 
+- [Atlantis to HCP Terraform Cutover Implementation Plan](../../implementation-plans/gcp-532-atlantis-to-tfc-cutover.md) — Story-by-story cutover process
 - [HCP Terraform WIF Playground Experiment](../experiments/terraform-automation-tools/hcp-terraform-wif-playground.md) — Phase 1 (SA impersonation) and Phase 2 (module) validation results
 - [GCP-536](https://redhat.atlassian.net/browse/GCP-536) — Spike: Evaluate HCP Terraform for GCP-HCP Infrastructure
 - [gcp-dynamic-creds module](https://app.terraform.io/app/hp-platform-engineering/registry/modules/private/hp-platform-engineering/gcp-dynamic-creds/tfe) — TFC private registry
