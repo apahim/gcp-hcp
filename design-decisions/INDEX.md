@@ -71,6 +71,7 @@ Decision records organized by topic. Use [TEMPLATE.md](TEMPLATE.md) when adding 
 | [agent-autonomy-levels](automation/agent-autonomy-levels.md) | Three-stage approach for agent-driven remediation with increasing autonomy levels |
 | [gcp-agent-platform](automation/gcp-agent-platform.md) | Gemini Enterprise Agent Platform for production-hosted agent workloads |
 | [go-controllers-runtime](automation/go-controllers-runtime.md) | Go controllers replacing config-based adapters for cluster lifecycle management |
+| [e2e-terraform-config-approach-with-tfc](automation/e2e-terraform-config-approach-with-tfc.md) | E2E infrastructure testing with TFC ephemeral workspaces |
 
 ## Governance
 

@@ -70,7 +70,7 @@ E2E infrastructure validation will use HCP Terraform (TFC) ephemeral workspaces 
 * Render script adds a build step and must be kept in sync with module changes (new modules, path changes)
 * Empty TFC workspaces accumulate after destroy and need periodic cleanup
 * CI environment bootstraps from integration state — changes to integration's global or platform-ci outputs can break e2e runs
-* `user_project_override` requires careful provider aliasing (`google.bootstrap`, `google.project_creation`) for folder operations — a pattern that must be maintained across module changes
+* `user_project_override` requires careful provider aliasing (`google.bootstrap` for folder creation, `google.project_creation` for folder IAM and project creation) — a pattern that must be maintained across module changes
 
 ## Cross-Cutting Concerns
 
@@ -84,13 +84,13 @@ E2E infrastructure validation will use HCP Terraform (TFC) ephemeral workspaces 
 ### Reliability:
 
 * **Destroy ordering**: GKE clusters depend on `null_resource.tfc_iam_ready` so IAM permissions are not revoked before cluster deletion completes. Without this, destroy fails with 403 errors on GKE API calls mid-deletion
-* **Provider aliasing**: Folder creation uses `google.bootstrap` (impersonated SA, no `user_project_override`) because the Resource Manager folders API rejects quota project override. This is validated in e2e and will catch regressions if provider configuration changes
+* **Provider aliasing**: Folder creation uses `google.bootstrap` (impersonated SA, `billing_project` = global project) rather than the default provider (whose `billing_project` = `gcp-hcp-platform-ci` lacks folder permissions). `google.project_creation` has no `user_project_override` at all, making it safe for folder IAM operations. This is validated in e2e and will catch regressions if provider configuration changes
 * **Resiliency**: Failed destroys should be retried with full state — never remove resources from Terraform state to work around permission errors, as this orphans GCP resources requiring admin cleanup
 
 ### Cost:
 
 * Each e2e run creates 2 GKE Autopilot clusters, 3 GCP projects, and associated networking — approximately $2-5 per test run at current pricing
-* Auto-destroy limits cost exposure from abandoned runs
+* Auto-destroy limits cost exposure from abandoned runs — the `auto-destroy-at` timer should be set via TFC API before `terraform apply` begins, so that even if apply or the CI pipeline crashes, the workspace has a destruction deadline. If the API call fails, the pipeline should abort before apply. The workspace cleanup process should also detect workspaces without auto-destroy timers as a secondary safety net
 * No persistent infrastructure cost between test runs
 
 ### Operability:
@@ -129,10 +129,10 @@ The e2e template configures three provider personas:
 | Provider | Authentication | `user_project_override` | Used For |
 |---|---|---|---|
 | `google` (default) | TFC SA via WIF | `true` (billing: `gcp-hcp-platform-ci`) | Most resources |
-| `google.project_creation` | Impersonated project-creator SA | `true` (billing: global project) | Project/folder creation, TFC IAM bootstrap |
+| `google.project_creation` | Impersonated project-creator SA | not set | Project creation, folder IAM, TFC IAM bootstrap |
 | `google.bootstrap` | Impersonated project-creator SA | `true` (billing: global project) | Folder creation (Resource Manager API) |
 
-The `user_project_override` gotcha: enabling it routes ALL GCP API quota through the billing project. The Resource Manager folders API rejects this, causing `folders.get` permission denied errors even with `folderAdmin`. The solution is provider aliasing — folder operations use `google.bootstrap` which impersonates the project-creator SA.
+The `user_project_override` gotcha: enabling it routes ALL GCP API quota through the billing project. When the billing project lacks the necessary folder-level permissions, this causes `folders.get` permission denied errors even with `folderAdmin`. The solution is provider aliasing — `google.bootstrap` routes quota through the global project (which has folder permissions), and `google.project_creation` has no `user_project_override` at all (safe for folder IAM). Both impersonate the project-creator SA.
 
 ### Feature Flags
 
