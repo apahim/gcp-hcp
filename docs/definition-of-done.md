@@ -65,20 +65,20 @@ In addition to meeting the requirements and any acceptance criteria from the Jir
 2. All acceptance criteria in the feature ticket are satisfied
 3. End-to-end validation confirms the feature works as intended in a representative environment
 4. Stakeholder demo completed if Demo Critical = Yes (or explicitly waived with documented rationale)
-5. Product documentation updated, or confirmed not required (Product Documentation Required field set)
+5. Product documentation updated (if Product Documentation Required = Yes), or field explicitly set to No
 6. Resolution field is set; final Jira comment summarizing the outcome is added
 
 ## Definition of Done: Initiative
 
 1. All child Epics are Closed (or any deferred scope documented with rationale)
-2. Strategic objectives and success criteria stated in the initiative are met or measured
+2. Strategic objectives and success criteria stated in the initiative are met — or any unmet targets have documented variance with approved follow-up
 3. Internal impact delivered — efficiency, reliability, scalability, or developer experience improvements are demonstrable
 4. Architecture and design documentation updated to reflect the initiative's outcomes
 5. Resolution field is set; final Jira comment summarizing the outcome is added
 
 ## Definition of Done: Risk
 
-A Risk is Closed when the underlying uncertainty has been resolved. One of the following must be true:
+A Risk is Closed when one of the following is true:
 
 1. **Mitigated:** Mitigation plan fully executed; linked mitigation stories/tasks are Closed
 2. **Accepted:** Team has explicitly accepted the risk with rationale documented in the ticket
