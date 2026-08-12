@@ -6,15 +6,15 @@
 
 ## Decision
 
-E2E infrastructure validation will use HCP Terraform (TFC) ephemeral workspaces with CLI-driven remote execution. Each test run renders a self-contained Terraform config from a template, creates an isolated TFC workspace, deploys the full region + management-cluster + customer-project stack, and destroys it after validation. The render script bundles all modules and metadata into a single directory so TFC can execute remotely without access to the source repository.
+E2E infrastructure validation will use HCP Terraform (TFC) ephemeral workspaces with CLI-driven remote execution. Each test run renders a self-contained Terraform config from a template, creates an isolated TFC workspace, deploys the full region + management-cluster + customer-project stack, and destroys it after validation. The render script bundles all modules and metadata into a single directory so TFC can execute remotely without access to the source repository. A future improvement is to publish modules to the TFC private registry, which would eliminate the bundling step.
 
 ## Context
 
-- **Problem Statement**: The GCP-HCP platform needs automated end-to-end infrastructure validation that can run in parallel across CI pipelines. The existing e2e-smoke test uses a long-lived GCP project with Tekton pipelines for Hypershift testing, but cannot validate Terraform infrastructure provisioning itself — the GCP projects, GKE clusters, networking, IAM, and service configuration that Terraform manages. Changes to Terraform modules (region, management-cluster, customer-project) need a way to validate that they can successfully provision and destroy a full environment before merging to main. This is tracked under [GCP-848](https://redhat.atlassian.net/browse/GCP-848).
+- **Problem Statement**: The GCP-HCP platform needs automated end-to-end infrastructure validation that can run in parallel across CI pipelines. The platform needs a full end-to-end validation pipeline that can build infrastructure, deploy applications, and test hosted cluster provisioning. Today there is no automated way to validate Terraform infrastructure provisioning itself — the GCP projects, GKE clusters, networking, IAM, and service configuration that Terraform manages. Changes to Terraform modules (region, management-cluster, customer-project) need a way to validate that they can successfully provision and destroy a full environment before merging to main.
 
 - **Constraints**:
   - Must support parallel test runs (multiple PRs testing simultaneously)
-  - Must use the same TFC infrastructure already adopted for production ([GCP-536](https://redhat.atlassian.net/browse/GCP-536))
+  - Must use the same TFC infrastructure already adopted for production
   - GCP project IDs are globally unique and limited to 30 characters
   - `user_project_override = true` is required for API quota routing but breaks folder-level Resource Manager API calls
   - OPA policies block `roles/owner` grants and folder IAM bindings in the `gcp-hcp-ci` TFC project
@@ -22,9 +22,9 @@ E2E infrastructure validation will use HCP Terraform (TFC) ephemeral workspaces 
   - All infrastructure must be IaC — no one-off gcloud commands
 
 - **Assumptions**:
-  - CI environments bootstrap from integration's shared infrastructure (global project, commons, platform-ci folder) since CI does not have its own global or service project
+  - CI environments are designed to be fully isolated. Remaining dependencies on integration state (DNS zones, state bucket access) are being decoupled as follow-up work
   - TFC WIF authentication is pre-configured via the `gcp-hcp-ci-tfc-access` workspace and project-scoped variable sets ([WIF design decision](hcp-terraform-workload-identity-federation.md))
-  - The e2e template deploys the same modules as production with feature flags to disable components that depend on infrastructure outside the ephemeral environment (DNS delegation, Atlantis IAM)
+  - The e2e template deploys the same modules as production with feature flags to disable components that depend on infrastructure outside the ephemeral environment (e.g., DNS delegation to parent zones)
   - A workspace cleanup mechanism (script or scheduled job) will handle empty workspace removal separately from this design (follow-up work to be tracked)
 
 ## Alternatives Considered
@@ -33,11 +33,13 @@ E2E infrastructure validation will use HCP Terraform (TFC) ephemeral workspaces 
 
 2. **VCS-driven TFC workspaces with trigger prefixes**: Connect TFC workspaces directly to the repository with `trigger_prefixes` pointing at module directories. Each PR creates a workspace via TFC API, TFC clones the repo and runs plan/apply. No render script needed.
 
-3. **Tekton pipeline with local Terraform execution**: Extend the existing Tekton pipeline infrastructure to run `terraform apply` inside a Tekton Task. State stored in GCS. Parallel runs via separate PipelineRuns with unique state prefixes.
+3. **Tekton pipeline with local Terraform execution** (deprecated): Extend the Tekton pipeline infrastructure to run `terraform apply` inside a Tekton Task. State stored in GCS. Parallel runs via separate PipelineRuns with unique state prefixes. Tekton is being replaced by Prow for CI, making this a dead-end investment.
 
-4. **Atlantis-based e2e**: Use the existing Atlantis infrastructure to run e2e plans and applies from a dedicated e2e branch or PR. Atlantis already has the IAM permissions and provider configuration.
+4. **Atlantis-based e2e** (planned for decommission): Use the existing Atlantis infrastructure to run e2e plans and applies from a dedicated e2e branch or PR. Atlantis already has the IAM permissions and provider configuration. Atlantis is being decommissioned as TFC becomes the standard for Terraform automation.
 
-5. **Dedicated long-lived e2e environment**: Maintain a permanent e2e GCP project (like the existing e2e-smoke setup) and run `terraform apply` against it. No ephemeral resources — test by updating in place.
+5. **Dedicated long-lived e2e environment**: Maintain a permanent e2e GCP project and run `terraform apply` against it. No ephemeral resources — test by updating in place.
+
+6. **Shell scripts with direct Terraform execution in Prow**: Run Terraform directly from Prow job steps via shell scripts. State stored in either GCS buckets or TFC workspaces. No render script — Prow clones the repo and runs Terraform with the correct working directory.
 
 ## Decision Rationale
 
@@ -50,9 +52,10 @@ E2E infrastructure validation will use HCP Terraform (TFC) ephemeral workspaces 
 
 * **Comparison**:
   - **Alternative 2 (VCS-driven)** requires the workspace to have repo access and know which branch to clone. For PR-based testing, this means creating workspaces that track feature branches — complex lifecycle management. CLI-driven mode is simpler: upload the config, run it, done.
-  - **Alternative 3 (Tekton)** duplicates the provider configuration and IAM setup already managed by TFC. Running Terraform locally inside a Tekton Task means managing state buckets, credential injection, and concurrency separately from TFC — the platform the team is migrating to.
-  - **Alternative 4 (Atlantis)** only supports PR-based workflows and is being deprecated in favor of TFC. Using it for e2e creates a dependency on infrastructure being removed.
+  - **Alternative 3 (Tekton)** is being replaced by Prow for CI, making it a dead-end investment. It also duplicates the provider configuration and IAM setup already managed by TFC.
+  - **Alternative 4 (Atlantis)** is planned for decommission as TFC becomes the standard. Using it for e2e creates a dependency on infrastructure being removed.
   - **Alternative 5 (long-lived environment)** cannot validate create-from-scratch flows, masks state drift issues, and doesn't support parallel testing.
+  - **Alternative 6 (shell scripts in Prow)** is viable but loses the benefits of TFC remote execution: consistent execution environment, run history in the TFC UI, OPA policy enforcement, and WIF credential management. With GCS state, parallel runs require careful state prefix management. With TFC state, this converges toward Alternative 1 but without the render script's path rewriting.
 
 ## Consequences
 
@@ -66,10 +69,10 @@ E2E infrastructure validation will use HCP Terraform (TFC) ephemeral workspaces 
 
 ### Negative
 
-* Each test run takes ~15-20 minutes for apply and ~10 minutes for destroy — slower than running against existing infrastructure
+* Each test run takes ~15-20 minutes for apply and ~10 minutes for destroy
 * Render script adds a build step and must be kept in sync with module changes (new modules, path changes)
 * Empty TFC workspaces accumulate after destroy and need periodic cleanup
-* CI environment bootstraps from integration state — changes to integration's global or platform-ci outputs can break e2e runs
+* Remaining dependencies on integration infrastructure (DNS zones, state bucket) are being decoupled as follow-up work
 * `user_project_override` requires careful provider aliasing (`google.bootstrap` for folder creation, `google.project_creation` for folder IAM and project creation) — a pattern that must be maintained across module changes
 
 ## Cross-Cutting Concerns
