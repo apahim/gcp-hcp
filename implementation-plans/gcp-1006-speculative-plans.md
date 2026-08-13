@@ -113,6 +113,7 @@ Key characteristics:
               fi
             fi
           }; f'
+          umask 077
           cat > "$HOME/.terraformrc" <<TFRC
           credentials "app.terraform.io" {
             token = "$(cat /etc/terraform-cloud/token)"
