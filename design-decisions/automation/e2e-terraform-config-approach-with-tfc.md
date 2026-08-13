@@ -22,7 +22,7 @@ E2E infrastructure validation will use HCP Terraform (TFC) ephemeral workspaces 
   - All infrastructure must be IaC — no one-off gcloud commands
 
 - **Assumptions**:
-  - CI environments are designed to be fully isolated. Remaining dependencies on integration state (DNS zones, state bucket access) are being decoupled as follow-up work
+  - CI environments target full isolation from other environments. DNS zones and state bucket access still depend on integration infrastructure and are being decoupled as follow-up work
   - TFC WIF authentication is pre-configured via the `gcp-hcp-ci-tfc-access` workspace and project-scoped variable sets ([WIF design decision](hcp-terraform-workload-identity-federation.md)). Prow authenticates to TFC via a team-level API token (`TFE_TOKEN`) mounted from a cluster profile secret — this token enables workspace creation and CLI-driven runs
   - The e2e template deploys the same modules as production with feature flags to disable components that depend on infrastructure outside the ephemeral environment (e.g., DNS delegation to parent zones)
   - A workspace cleanup mechanism (script or scheduled job) will handle empty workspace removal separately from this design (follow-up work to be tracked)
@@ -85,7 +85,7 @@ E2E infrastructure validation will use HCP Terraform (TFC) ephemeral workspaces 
 * TFC SAs authenticate via Workload Identity Federation — no static keys. Tokens are short-lived (~1h) and scoped to the TFC run phase (plan or apply)
 * OPA policies enforce `block_folder_iam` and `block_owner_grants` on all e2e workspaces — same enforcement as production
 * The e2e template passes `folder_iam_bindings = {}` to comply with `block_folder_iam` policy rather than requesting an exception
-* TFC SA permissions are bootstrapped via project-creator SA impersonation — the TFC SA never holds persistent elevated permissions. The impersonation grant is scoped to all workspaces in the `gcp-hcp-ci` TFC project (via `apply_to_all_workspaces`), which is acceptable since all workspaces in this project are ephemeral e2e runs. OPA policies (`block_folder_iam`, `block_owner_grants`) provide guardrails against privilege escalation within those workspaces
+* TFC SA permissions are bootstrapped via project-creator SA impersonation — the TFC SA never holds persistent elevated permissions. The impersonation grant is scoped to all workspaces in the `gcp-hcp-ci` TFC project (via `apply_to_all_workspaces`), which is acceptable since workspaces in this project are either ephemeral e2e runs or the permanent WIF access configuration workspace (`gcp-hcp-ci-tfc-access`). OPA policies (`block_folder_iam`, `block_owner_grants`) provide guardrails against privilege escalation within those workspaces
 
 ### Reliability:
 
