@@ -65,12 +65,14 @@ Key characteristics:
      - Changes only to non-integration paths (e.g., `terraform/config/global/stage/`) -> skip with a message "No integration workspaces affected"
   3. For each affected workspace:
      ```bash
-     cd terraform/config/<working_directory_path>
-     TF_TOKEN_app_terraform_io=$(cat /etc/terraform-cloud/token) \
+     cd <working_directory>
      terraform init -input=false
-     terraform plan -refresh=false -input=false -detailed-exitcode
+     terraform plan -refresh=false -input=false -detailed-exitcode || rc=$?
      ```
+     **Implementation note**: The script must capture the exit code explicitly (e.g., `|| rc=$?` or `set +e` around the plan command) rather than letting `set -e` terminate the loop on exit code 2. Continue processing all remaining workspaces before aggregating.
   4. Map exit codes per workspace: 0 = no changes, 1 = error, 2 = changes detected (success). Aggregate: return 1 if any workspace errored, otherwise return 0 (both "no changes" and "changes detected" are successful outcomes for a presubmit)
+
+  **Validation required**: Confirm that `-detailed-exitcode` propagates correctly through CLI remote execution (cloud backend). The Terraform docs do not explicitly address whether exit code 2 returns from a remote speculative plan to the local CLI. Test this against a real TFC workspace before relying on it -- if it doesn't propagate, fall back to parsing the plan output or using the TFC Runs API to check for changes.
 - [ ] Add a `Makefile` target `terraform-plan-speculative` that wraps the script
 - [ ] Test locally with a sample PR diff
 
