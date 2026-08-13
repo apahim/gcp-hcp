@@ -43,7 +43,7 @@ E2E infrastructure validation will use HCP Terraform (TFC) ephemeral workspaces 
 
 ## Decision Rationale
 
-* **Justification**: Alternative 1 (TFC ephemeral workspaces) provides complete isolation between parallel test runs, uses the same TFC platform being adopted for production, and requires no additional infrastructure beyond what already exists. CLI-driven mode avoids the complexity of VCS-driven workspace management while keeping execution remote (consistent with production). The render script solves the key challenge: TFC remote execution needs all files uploaded, but the repo structure uses relative paths (`../../../modules/`) that only work locally. Bundling produces a self-contained directory that works in both local and remote contexts.
+* **Justification**: Alternative 1 (TFC ephemeral workspaces) provides complete isolation between parallel test runs, uses the same TFC platform being adopted for production, and requires no additional Terraform execution platform beyond what already exists. CLI-driven mode avoids the complexity of VCS-driven workspace management while keeping execution remote (consistent with production). The render script solves the key challenge: TFC remote execution needs all files uploaded, but the repo structure uses relative paths (`../../../modules/`) that only work locally. Bundling produces a self-contained directory that works in both local and remote contexts.
 
 * **Evidence**: Validated end-to-end across multiple test runs:
   - test010: 437 resources applied → 0-error destroy (single-shot success)
@@ -116,7 +116,7 @@ The e2e template lives at `terraform/config/platform-ci/@e2e/` and consists of:
 
 The render script (`scripts/e2e-render.sh`) produces a self-contained directory:
 
-```
+```text
 platform-ci/e2e-{run_id}/
 ├── cloud.tf          # TFC backend (workspace name substituted)
 ├── main.tf           # Module calls (placeholders substituted, paths rewritten)
@@ -149,7 +149,7 @@ The `user_project_override` gotcha: enabling it routes ALL GCP API quota through
 
 ### Lifecycle
 
-```
+```text
 render → init (workspace auto-created) → apply → [validate] → destroy
                                                               ↑
                                               or: auto-destroy-at API
