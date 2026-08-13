@@ -23,7 +23,7 @@ E2E infrastructure validation will use HCP Terraform (TFC) ephemeral workspaces 
 
 - **Assumptions**:
   - CI environments are designed to be fully isolated. Remaining dependencies on integration state (DNS zones, state bucket access) are being decoupled as follow-up work
-  - TFC WIF authentication is pre-configured via the `gcp-hcp-ci-tfc-access` workspace and project-scoped variable sets ([WIF design decision](hcp-terraform-workload-identity-federation.md))
+  - TFC WIF authentication is pre-configured via the `gcp-hcp-ci-tfc-access` workspace and project-scoped variable sets ([WIF design decision](hcp-terraform-workload-identity-federation.md)). Prow authenticates to TFC via a team-level API token (`TFE_TOKEN`) mounted from a cluster profile secret — this token enables workspace creation and CLI-driven runs
   - The e2e template deploys the same modules as production with feature flags to disable components that depend on infrastructure outside the ephemeral environment (e.g., DNS delegation to parent zones)
   - A workspace cleanup mechanism (script or scheduled job) will handle empty workspace removal separately from this design (follow-up work to be tracked)
 
@@ -41,6 +41,8 @@ E2E infrastructure validation will use HCP Terraform (TFC) ephemeral workspaces 
 
 6. **Shell scripts with direct Terraform execution in Prow**: Run Terraform directly from Prow job steps via shell scripts. State stored in either GCS buckets or TFC workspaces. No render script — Prow clones the repo and runs Terraform with the correct working directory.
 
+7. **Static e2e config folder with ephemeral state**: Create a permanent `terraform/config/e2e/` directory with a dedicated config that references the same modules but is parameterized for CI use. State isolation via per-run TFC workspaces or GCS prefixes. No render script — the config is committed and maintained alongside production configs.
+
 ## Decision Rationale
 
 * **Justification**: Alternative 1 (TFC ephemeral workspaces) provides complete isolation between parallel test runs, uses the same TFC platform being adopted for production, and requires no additional Terraform execution platform beyond what already exists. CLI-driven mode avoids the complexity of VCS-driven workspace management while keeping execution remote (consistent with production). The render script solves the key challenge: TFC remote execution needs all files uploaded, but the repo structure uses relative paths (`../../../modules/`) that only work locally. Bundling produces a self-contained directory that works in both local and remote contexts.
@@ -56,6 +58,7 @@ E2E infrastructure validation will use HCP Terraform (TFC) ephemeral workspaces 
   - **Alternative 4 (Atlantis)** is planned for decommission as TFC becomes the standard. Using it for e2e creates a dependency on infrastructure being removed.
   - **Alternative 5 (long-lived environment)** cannot validate create-from-scratch flows, masks state drift issues, and doesn't support parallel testing.
   - **Alternative 6 (shell scripts in Prow)** is viable but loses the benefits of TFC remote execution: consistent execution environment, run history in the TFC UI, OPA policy enforcement, and WIF credential management. With GCS state, parallel runs require careful state prefix management. With TFC state, this converges toward Alternative 1 but without the render script's path rewriting.
+  - **Alternative 7 (static e2e folder)** reduces the moving parts (no render script) but creates a second copy of module call configuration that must be kept in sync with production templates. Config drift between the static e2e folder and production configs is the primary risk — changes to module interfaces require updates in two places.
 
 ## Consequences
 
@@ -102,6 +105,8 @@ E2E infrastructure validation will use HCP Terraform (TFC) ephemeral workspaces 
 * Rendered directories are gitignored and disposable — no need to commit test artifacts
 * Workspace naming convention (`platform-e2e-{run_id}`) makes it easy to identify and filter test workspaces in the TFC UI
 * All module feature flags (`enable_atlantis`, `enable_dns_delegation`, `skip_region_project_lookup`, `folder_iam_bindings`) are documented in the template with comments explaining why each is set
+* Prow integration will pin e2e runs to a specific git commit, ensuring Terraform and ArgoCD deploy the same version of the codebase
+* Boskos provides concurrency control (quota slots) to prevent exceeding GCP project or API quota limits during parallel runs
 
 ---
 
@@ -157,6 +162,21 @@ render → init (workspace auto-created) → apply → [validate] → destroy
 
 Workspaces persist after destroy with run history for debugging. Empty workspace cleanup is handled by a separate process.
 
+
+### Parallel Run Safety Audit
+
+All Terraform resource names in the region, management-cluster, and customer-project modules are parameterized via `infra_id`, which is unique per e2e run. No hardcoded resource names were found that would conflict between simultaneous runs:
+
+- **GCP projects**: `{abbreviation}-{type}-{region_code}-{infra_id}` — unique per run
+- **Folders**: Named after project ID — unique per run
+- **VPC networks**: `{env}-{type}-{region_code}-vpc` — scoped to the per-run project, no cross-project conflicts
+- **DNS zones**: `hc-{region}-{infra_id}-{N}` — unique per run
+- **GKE clusters**: `{project_id}-gke` — unique per run (project ID contains infra_id)
+- **Service accounts**: Created within per-run projects — no cross-project conflicts
+- **IAM bindings**: Scoped to per-run projects — no conflicts
+- **Cloud Run services, Workflows, PubSub topics**: All within per-run projects
+
+The `random_id` resource in customer-project generates a unique 4-character suffix per workspace state, providing additional isolation. Boskos will provide concurrency control (quota slots) in the Prow integration to prevent exceeding GCP quota limits.
 ### Related PRs
 
 | PR | Repository | Description |
