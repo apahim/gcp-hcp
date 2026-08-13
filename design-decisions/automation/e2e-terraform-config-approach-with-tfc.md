@@ -158,7 +158,7 @@ The `user_project_override` gotcha: enabling it routes ALL GCP API quota through
 render → init (workspace auto-created) → apply → [validate] → destroy
 ```
 
-The pipeline runs `terraform destroy` as the final step to tear down all infrastructure. A 24-hour `auto-destroy-at` timer is set on the workspace before apply as a safety net — if the pipeline's destroy fails or a human keeps the environment online for diagnosis, the timer triggers a secondary destroy to prevent resource leaks. Workspaces persist after destroy with run history for debugging. Empty workspace cleanup is handled by a separate process.
+The pipeline runs `terraform destroy` as the final step to tear down all infrastructure. A 24-hour `auto-destroy-at` timer is set on the workspace before apply as a safety net — if the pipeline's destroy fails or the destroy step is skipped after a test failure to preserve the environment for diagnosis, the timer triggers a secondary destroy to prevent resource leaks. Workspaces persist after destroy with run history for debugging. Empty workspace cleanup is handled by a separate process.
 
 
 ### Parallel Run Safety Audit
