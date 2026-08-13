@@ -60,6 +60,7 @@ Key characteristics:
      - `terraform/modules/global/` -> `gcp-hcp-global-integration`
      - `terraform/modules/region/` -> all region integration workspaces
      - `terraform/modules/management-cluster/` -> all MC integration workspaces
+     - `terraform/modules/<any other subdirectory>` -> all integration workspaces (catch-all -- shared modules like `commons/`, `service/`, etc. could affect any workspace)
      - `terraform/metadata/`, `terraform/workflows/`, `terraform/dashboards/` -> all integration workspaces
      - Changes only to non-integration paths (e.g., `terraform/config/global/stage/`) -> skip with a message "No integration workspaces affected"
   3. For each affected workspace:
@@ -146,7 +147,7 @@ Key characteristics:
 - [ ] A PR from a first-time/external contributor does not trigger the speculative plan until an org member (OWNERS) comments `/ok-to-test`
 
 **Design Notes**:
-- **Workspace discovery**: The script uses a static mapping from changed file paths to workspace names. Dynamic discovery via TFC API (list workspaces, match by `working_directory`) is a future enhancement to avoid config drift.
+- **Workspace discovery**: The script uses a static mapping from changed file paths to workspace names. The mapping is scoped to **integration workspaces only** since those are the only workspaces currently on TFC. Any `terraform/modules/` subdirectory not explicitly mapped to a specific workspace (e.g., `commons/`, `service/`, `pagerduty/`) falls through to the catch-all: plan against all integration workspaces. This is safe since speculative plans are read-only, and conservative since shared modules could affect any workspace. When stage/production workspaces are added to TFC, the mapping must be expanded to include those workspaces and their corresponding path scopes. Dynamic discovery via the TFC API (list workspaces, match by `working_directory` and `trigger_prefixes`) is a future enhancement to eliminate static-mapping drift entirely -- see Deferred section.
 - **Fork PR trust boundary**: Speculative plans execute remotely with access to workspace variables and state -- `Plan runs` permission is security-equivalent to `Write`, not a confidentiality boundary. Rely on Prow's standard org-member/`/ok-to-test` gating rather than any custom allow-list logic in the script itself.
 - **Which workspaces**: Only integration workspaces -- stage/production plans require separate credentials and are a future enhancement.
 - **Credential helper scoping**: The Git credential helper is scoped to `github.com` only. It rejects credential requests for other hosts to prevent a malicious Terraform module source from exfiltrating the GitHub token.
@@ -194,5 +195,6 @@ Key characteristics:
 
 ## Deferred
 
+* **Expand scope to stage/production workspaces**: The static workspace mapping currently covers integration workspaces only. When stage and production workspaces are added to TFC, expand the mapping to include those environments, their `run_if_changed` paths, and any additional credentials required (stage/production may use separate TFC tokens or WIF SAs)
 * **Plan output as PR comment**: Start with TFC's native GitHub check integration; add custom PR comment formatting later if needed
-* **Automatic workspace discovery from metadata**: Use `terraform/metadata/environments.yaml` and `terraform/metadata/infra_ids.yaml` to dynamically generate workspace-to-branch mappings instead of the static path mapping in Phase 1
+* **Automatic workspace discovery from metadata**: Use `terraform/metadata/environments.yaml` and `terraform/metadata/infra_ids.yaml` to dynamically generate workspace-to-branch mappings instead of the static path mapping in Phase 1. This would also eliminate the need to manually keep the static mapping in sync with TFC workspace `trigger_prefixes` defined in `hcp-terraform/gcp-hcp-integration/main.tf`
