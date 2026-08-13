@@ -10,13 +10,13 @@ E2E infrastructure validation will use HCP Terraform (TFC) ephemeral workspaces 
 
 ## Context
 
-- **Problem Statement**: The GCP-HCP platform needs automated end-to-end infrastructure validation that can run in parallel across CI pipelines. The platform needs a full end-to-end validation pipeline that can build infrastructure, deploy applications, and test hosted cluster provisioning. Today there is no automated way to validate Terraform infrastructure provisioning itself — the GCP projects, GKE clusters, networking, IAM, and service configuration that Terraform manages. Changes to Terraform modules (region, management-cluster, customer-project) need a way to validate that they can successfully provision and destroy a full environment before merging to main.
+- **Problem Statement**: The GCP-HCP platform needs automated end-to-end infrastructure validation that can run in parallel across CI pipelines. The platform needs a full end-to-end validation pipeline that can build infrastructure, deploy applications, and test hosted cluster provisioning. Today Terraform infrastructure provisioning is validated via Tekton pipelines on the integration global cluster, but this approach is brittle — it cannot integrate with GitHub slash commands, only supports one concurrent run due to fixed state paths, and running on GKE Autopilot has proven difficult to maintain — the GCP projects, GKE clusters, networking, IAM, and service configuration that Terraform manages. Changes to Terraform modules (region, management-cluster, customer-project) need a way to validate that they can successfully provision and destroy a full environment before merging to main.
 
 - **Constraints**:
   - Must support parallel test runs (multiple PRs testing simultaneously)
-  - Must use the same TFC infrastructure already adopted for production
+  - Must use the same TFC infrastructure used for managing the static environments (integration, stage)
   - GCP project IDs are globally unique and limited to 30 characters
-  - `user_project_override = true` is required for API quota routing but breaks folder-level Resource Manager API calls
+  - `user_project_override = true` routes API quota through a billing project, which requires careful provider configuration for operations like folder creation
   - OPA policies block `roles/owner` grants and folder IAM bindings in the `gcp-hcp-ci` TFC project
   - Must not require manual cleanup — failed runs should be recoverable without admin intervention
   - All infrastructure must be IaC — no one-off gcloud commands
