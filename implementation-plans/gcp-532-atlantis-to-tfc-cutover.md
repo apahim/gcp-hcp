@@ -6,6 +6,8 @@ Migrate infrastructure automation from self-hosted Atlantis to HCP Terraform Clo
 
 Integration environment first, then stage. Production does not have Atlantis today, so TFC will be the first automation there.
 
+**Status (2026-08-20)**: Stories 1–5 are complete for integration — `terraform/atlantis-integration.yaml` no longer lists `global`, `region`, or `management-cluster` projects, all three run on TFC with `auto_apply = true` (validated in [GCP-951](https://redhat.atlassian.net/browse/GCP-951), now Closed). Region/MC onboarding automation (Story 6 script work) shipped under [GCP-535](https://redhat.atlassian.net/browse/GCP-535). 4 Atlantis projects remain unmigrated — `hypershift-ci`, `platform-ci`, `service`, `pagerduty` — none were in the epic's original scope; see [Remaining Atlantis Projects](#remaining-atlantis-projects-not-yet-migrated) for target TFC projects and tracking tickets ([GCP-1092](https://redhat.atlassian.net/browse/GCP-1092), [GCP-1093](https://redhat.atlassian.net/browse/GCP-1093), [GCP-1094](https://redhat.atlassian.net/browse/GCP-1094)). Also remaining: Story 6 doc finalization ([GCP-952](https://redhat.atlassian.net/browse/GCP-952)), Story 7/8 stage and production rollout ([GCP-953](https://redhat.atlassian.net/browse/GCP-953)), Story 9 decommission ([GCP-954](https://redhat.atlassian.net/browse/GCP-954)).
+
 **Epic**: [GCP-532](https://redhat.atlassian.net/browse/GCP-532) - Terraform Cloud Evaluation & Plan
 
 **Spike**: [GCP-536](https://redhat.atlassian.net/browse/GCP-536) - Evaluate HCP Terraform for GCP-HCP Infrastructure
@@ -73,8 +75,8 @@ For existing infrastructure currently managed by Atlantis (global, region, MC), 
 1. Freeze Atlantis for the workspace (disable the autoplan entry in `atlantis-{env}.yaml` or drain in-flight operations) to prevent state changes during the migration window
 2. Lock the TFC workspace (API or UI)
 3. Download the current state from GCS (`gsutil cp gs://{bucket}/{workspace}.tfstate .`)
-4. Upload the state to TFC via the [State Versions API](https://developer.hashicorp.com/terraform/cloud-docs/api-docs/state-versions): base64-encode the state JSON, compute its MD5 hash, POST to `/workspaces/{id}/state-versions`
-5. Verify the state in the TFC UI (resource count matches expectations)
+4. Upload the state to TFC via the [State Versions API](https://developer.hashicorp.com/terraform/cloud-docs/api-docs/state-versions): `POST /workspaces/{id}/state-versions` with `data.type = "state-versions"`, `data.attributes.serial` (matching the state file's serial), `data.attributes.md5`, and either the base64-encoded `data.attributes.state` or the hosted-upload-url flow
+5. Poll until `status = "finalized"` and verify in the TFC UI that resource count matches expectations — do not proceed while still `pending`
 6. Unlock the workspace
 7. Securely delete the downloaded `.tfstate` file from the operator's workstation (it may contain sensitive resource attributes)
 
@@ -120,7 +122,7 @@ Reference: [GCP Quota project overview](https://cloud.google.com/docs/quotas/quo
 
 ---
 
-## Story 1: Bootstrap Access Project (Integration)
+## Story 1: Bootstrap Access Project (Integration) — ✅ Complete
 
 ### Summary
 
@@ -137,7 +139,7 @@ Create the dedicated access GCP project for integration, containing the WIF pool
 
 ### Tasks
 
-- [ ] Create `terraform/config/tfc-access/integration/main.tf`:
+- [x] Create `terraform/config/tfc-access/integration/main.tf`:
   - `google_project` resource for `gcp-hcp-int-tfc-access` in the integration folder
   - `gcp-dynamic-creds` module call sourced from `app.terraform.io/hp-platform-engineering/gcp-dynamic-creds/tfe`
   - Module inputs: `project_id`, `tfc_organization`, `tfc_project_name = "gcp-hcp-integration"`, `apply_to_all_workspaces = true`
@@ -145,26 +147,26 @@ Create the dedicated access GCP project for integration, containing the WIF pool
   - `apply_roles` — self-management roles for the access project only: `roles/viewer`, `roles/iam.workloadIdentityPoolAdmin`, `roles/iam.serviceAccountAdmin`, `roles/resourcemanager.projectIamAdmin`, `roles/serviceusage.serviceUsageAdmin`
   - Note: these roles apply to the access project, not target projects. The full Atlantis role set is granted on target projects in Story 2 (cross-project IAM).
   - `cloud {}` backend block (commented out for initial local apply)
-- [ ] Create `terraform/config/tfc-access/integration/versions.tf` with provider version constraints
-- [ ] Run `terraform init && terraform apply` locally
-- [ ] Verify in TFC UI: variable set exists, `apply_to_all_workspaces` is enabled, 4 `TFC_GCP_*` variables present
-- [ ] Register access workspace in meta workspace (`hcp-terraform/meta/main.tf` or equivalent) — workspace must exist before state migration
-- [ ] Uncomment `cloud {}` backend block
-- [ ] Run `terraform init -migrate-state` to migrate state to TFC
+- [x] Create `terraform/config/tfc-access/integration/versions.tf` with provider version constraints
+- [x] Run `terraform init && terraform apply` locally
+- [x] Verify in TFC UI: variable set exists, `apply_to_all_workspaces` is enabled, 4 `TFC_GCP_*` variables present
+- [x] Register access workspace in meta workspace (`hcp-terraform/meta/main.tf` or equivalent) — workspace must exist before state migration
+- [x] Uncomment `cloud {}` backend block
+- [x] Run `terraform init -migrate-state` to migrate state to TFC
   > Note: `terraform init -migrate-state` works here because the access workspace starts with **local** state (from the initial apply). Existing workspaces with GCS state (Story 4) require the State Versions API instead — see [State Management](#3-state-management).
 
 ### Acceptance Criteria
 
-- [ ] GCP project `gcp-hcp-int-tfc-access` exists in the integration folder
-- [ ] WIF pool and OIDC provider exist in the access project
-- [ ] Plan and apply SAs exist in the access project
-- [ ] TFC variable set `*-gcp-dynamic-creds` attached to `gcp-hcp-integration` project with `apply_to_all_workspaces = true`
-- [ ] Variable set contains the expected `TFC_GCP_*` variables (`TFC_GCP_PROVIDER_AUTH`, `TFC_GCP_PLAN_SERVICE_ACCOUNT_EMAIL`, `TFC_GCP_APPLY_SERVICE_ACCOUNT_EMAIL`, `TFC_GCP_WORKLOAD_PROVIDER_NAME`)
-- [ ] State managed by TFC (not local)
+- [x] GCP project `gcp-hcp-int-tfc-access` exists in the integration folder
+- [x] WIF pool and OIDC provider exist in the access project
+- [x] Plan and apply SAs exist in the access project
+- [x] TFC variable set `*-gcp-dynamic-creds` attached to `gcp-hcp-integration` project with `apply_to_all_workspaces = true`
+- [x] Variable set contains the expected `TFC_GCP_*` variables (`TFC_GCP_PROVIDER_AUTH`, `TFC_GCP_PLAN_SERVICE_ACCOUNT_EMAIL`, `TFC_GCP_APPLY_SERVICE_ACCOUNT_EMAIL`, `TFC_GCP_WORKLOAD_PROVIDER_NAME`)
+- [x] State managed by TFC (not local)
 
 ---
 
-## Story 2: Cross-Project IAM for Plan and Apply SAs (Integration)
+## Story 2: Cross-Project IAM for Plan and Apply SAs (Integration) — ✅ Complete
 
 ### Summary
 
@@ -176,7 +178,7 @@ Grant both the plan and apply SAs the full write role set on each target project
 
 ### Tasks
 
-- [ ] Create `terraform/modules/global/tfc.tf`:
+- [x] Create `terraform/modules/global/tfc.tf`:
   - Variables: `enable_tfc` (default `false`), `tfc_plan_sa_email`, `tfc_apply_sa_email`
   - Apply SA — 19 project-level roles (same as Atlantis):
     `container.admin`, `gkehub.admin`, `compute.networkAdmin`, `storage.admin`, `compute.instanceAdmin.v1`, `iam.serviceAccountAdmin`, `resourcemanager.projectIamAdmin`, `serviceusage.serviceUsageAdmin`, `compute.securityAdmin`, `dns.admin`, `secretmanager.admin`, `certificatemanager.editor`, `iap.admin`, `artifactregistry.admin`, `cloudbuild.builds.editor`, `logging.admin`, `iam.workloadIdentityPoolAdmin`, `monitoring.metricsScopesAdmin`, `monitoring.editor`
@@ -184,22 +186,22 @@ Grant both the plan and apply SAs the full write role set on each target project
     `resourcemanager.projectCreator`, `resourcemanager.folderAdmin`, `logging.configWriter`
   - Plan SA — same 19 project-level roles as apply SA (unified roles catch permission issues at plan time)
   - All resources gated by `var.enable_tfc`
-- [ ] Create `terraform/modules/region/tfc.tf`:
+- [x] Create `terraform/modules/region/tfc.tf`:
   - Both SAs — 24 cross-project roles (same as `atlantis.tf`):
     `resourcemanager.projectIamAdmin`, `viewer`, `container.admin`, `compute.networkAdmin`, `storage.admin`, `compute.instanceAdmin.v1`, `iam.serviceAccountAdmin`, `iam.serviceAccountUser`, `serviceusage.serviceUsageAdmin`, `compute.securityAdmin`, `dns.admin`, `gkehub.admin`, `secretmanager.admin`, `workflows.admin`, `run.admin`, `pubsub.admin`, `eventarc.admin`, `resourcemanager.tagAdmin`, `resourcemanager.tagUser`, `privilegedaccessmanager.admin`, `storage.hmacKeyAdmin`, `bigquery.admin`, `artifactregistry.admin`, `monitoring.metricsScopesAdmin`
   - Same bootstrap pattern as `atlantis.tf` (project-creator impersonation for initial `projectIamAdmin`)
-- [ ] Create `terraform/modules/management-cluster/tfc.tf`:
+- [x] Create `terraform/modules/management-cluster/tfc.tf`:
   - Both SAs — 20 cross-project roles (region minus: `gkehub.admin`, `storage.hmacKeyAdmin`, `bigquery.admin`, `artifactregistry.admin`)
-- [ ] Enable in integration configs:
+- [x] Enable in integration configs:
   - `terraform/config/global/integration/main/us-central1/main.tf`: `enable_tfc = true`, `tfc_plan_sa_email = "..."`, `tfc_apply_sa_email = "..."`
   - `terraform/config/region/integration/main/us-central1/main.tf`: same
   - `terraform/config/management-cluster/integration/main/us-central1-yjiv/main.tf`: same
-- [ ] Open PR, apply via Atlantis
+- [x] Open PR, apply via Atlantis
 
 ### Acceptance Criteria
 
-- [ ] `terraform plan` shows IAM bindings for both plan and apply SAs on all target projects
-- [ ] After apply, both plan and apply SAs can read and modify resources in global/region/MC projects
+- [x] `terraform plan` shows IAM bindings for both plan and apply SAs on all target projects
+- [x] After apply, both plan and apply SAs can read and modify resources in global/region/MC projects
 
 ### Notes
 
@@ -207,7 +209,7 @@ Split IAM creation from workspace creation — IAM propagation delay (~60s) mean
 
 ---
 
-## Story 3: Commons Cross-Project Grants (Integration)
+## Story 3: Commons Cross-Project Grants (Integration) — ✅ Complete
 
 ### Summary
 
@@ -219,7 +221,7 @@ Grant the apply SA access to commons resources: Terraform state bucket, GAR repo
 
 ### Tasks
 
-- [ ] Create `terraform/modules/commons/tfc-iam.tf` (parallel to `atlantis-iam.tf`):
+- [x] Create `terraform/modules/commons/tfc-iam.tf` (parallel to `atlantis-iam.tf`):
   - `roles/storage.objectViewer` on commons TF state bucket for plan SA — needed for `terraform_remote_state` reads during speculative plans
   - `roles/storage.objectViewer` on commons TF state bucket for apply SA — same reads during apply phase
   - `roles/artifactregistry.admin` on commons GAR repo for apply SA
@@ -227,18 +229,18 @@ Grant the apply SA access to commons resources: Terraform state bucket, GAR repo
   - Iterate over `var.environment_dns_zones` (excluding dev)
   - Members: `serviceAccount:{plan_sa}@gcp-hcp-{env_abbrev}-tfc-access.iam.gserviceaccount.com` and `serviceAccount:{apply_sa}@gcp-hcp-{env_abbrev}-tfc-access.iam.gserviceaccount.com`
   - Note: `objectViewer` is correct — matches Atlantis. Workspace state lives in TFC (cloud backend), not GCS. The commons bucket is only accessed via `terraform_remote_state` data sources for commons outputs.
-- [ ] Coordinate with SRE for manual apply
+- [x] Coordinate with SRE for manual apply
 
 ### Acceptance Criteria
 
-- [ ] Plan SA can read commons Terraform state (for `terraform_remote_state` in speculative plans)
-- [ ] Apply SA can read commons Terraform state
-- [ ] Apply SA can push to commons GAR
-- [ ] Apply SA can impersonate `project-creator` SA
+- [x] Plan SA can read commons Terraform state (for `terraform_remote_state` in speculative plans)
+- [x] Apply SA can read commons Terraform state
+- [x] Apply SA can push to commons GAR
+- [x] Apply SA can impersonate `project-creator` SA
 
 ---
 
-## Story 4: TFC Workspace Definitions (Integration)
+## Story 4: TFC Workspace Definitions (Integration) — ✅ Complete
 
 ### Summary
 
@@ -250,7 +252,7 @@ Create TFC workspaces mirroring the Atlantis projects in `atlantis-integration.y
 
 ### Tasks
 
-- [ ] Create `hcp-terraform/gcp-hcp-int/main.tf` with workspace definitions via `workspaces/tfe` module:
+- [x] Create `hcp-terraform/gcp-hcp-integration/main.tf` with workspace definitions via `workspaces/tfe` module:
 
   | TFC Workspace | Working Directory | Trigger Prefixes |
   |---|---|---|
@@ -258,13 +260,13 @@ Create TFC workspaces mirroring the Atlantis projects in `atlantis-integration.y
   | `gcp-hcp-region-int-main-us-central1` | `terraform/config/region/integration/main/us-central1` | `terraform/workflows/`, `terraform/metadata/`, `terraform/modules/region/` |
   | `gcp-hcp-mc-int-main-us-central1-yjiv` | `terraform/config/management-cluster/integration/main/us-central1-yjiv` | `terraform/workflows/`, `terraform/metadata/`, `terraform/modules/management-cluster/` |
 
-  > **Note**: Trigger prefixes must include shared module paths (`terraform/modules/{type}/`) so that changes to the module source trigger plans in dependent workspaces.
+  > **Note**: Trigger prefixes must include shared module paths (`terraform/modules/{type}/`) so that changes to the module source trigger plans in dependent workspaces. Additional regions/MCs (e.g. us-west1, us-south1) have since been onboarded via [GCP-535](https://redhat.atlassian.net/browse/GCP-535) automation.
 
-- [ ] Create workspaces with `auto_apply = false` — auto-apply is enabled after validation (Story 5)
-- [ ] Create `hcp-terraform/gcp-hcp-int/cloud.tf` pointing at meta workspace
-- [ ] No `tfe_variable_set` or `tfe_variable` resources needed — module handles variable sets via `apply_to_all_workspaces`
-- [ ] Open PR, merge to main (meta workspace applies)
-- [ ] **Provider configuration** for each migrated workspace config -- update `google` and `google-beta` provider blocks **before** state seeding and the first speculative plan:
+- [x] Create workspaces with `auto_apply = false` — auto-apply is enabled after validation (Story 5)
+- [x] Create `hcp-terraform/gcp-hcp-integration/cloud.tf` pointing at meta workspace
+- [x] No `tfe_variable_set` or `tfe_variable` resources needed — module handles variable sets via `apply_to_all_workspaces`
+- [x] Open PR, merge to main (meta workspace applies)
+- [x] **Provider configuration** for each migrated workspace config -- update `google` and `google-beta` provider blocks **before** state seeding and the first speculative plan:
   ```hcl
   locals {
     global_project_id = "gcp-hcp-${local.env_config.abbreviation}-global"
@@ -277,28 +279,28 @@ Create TFC workspaces mirroring the Atlantis projects in `atlantis-integration.y
   }
   ```
   This redirects GCP API activation checks to the global project, avoiding bootstrap issues with non-existent target projects (see [API Activation](#api-activation-and-the-user_project_override-pattern) above). The `global_project_id` local is derived from metadata because provider blocks cannot reference data sources. Both `google` and `google-beta` provider blocks must be updated, including any aliased providers. See [PR #1114](https://github.com/openshift-online/gcp-hcp-infra/pull/1114) for reference.
-- [ ] **State seeding** (per workspace, for workspaces with existing Atlantis-managed infrastructure):
+- [x] **State seeding** (per workspace, for workspaces with existing Atlantis-managed infrastructure):
   1. Freeze Atlantis for the workspace: disable the autoplan entry in `atlantis-{env}.yaml` (or drain/cancel in-flight Atlantis operations) to prevent state changes during the migration window
   2. Lock the TFC workspace via API
   3. Download the current state from GCS: `gsutil cp gs://{state-bucket}/{workspace}.tfstate .`
   4. Base64-encode the state JSON and compute its MD5 hash
-  5. Upload to TFC via the [State Versions API](https://developer.hashicorp.com/terraform/cloud-docs/api-docs/state-versions): `POST /workspaces/{id}/state-versions`
-  6. Verify in TFC UI that resource count matches the GCS state
+  5. Upload to TFC via the [State Versions API](https://developer.hashicorp.com/terraform/cloud-docs/api-docs/state-versions): `POST /workspaces/{id}/state-versions` with `data.type = "state-versions"`, `data.attributes.serial` (matching the state file's serial), `data.attributes.md5`, and either the base64-encoded `data.attributes.state` or the hosted-upload-url flow
+  6. Poll until `status = "finalized"` and verify in TFC UI that resource count matches the GCS state — do not proceed while still `pending`
   7. Unlock the workspace
   8. Run a speculative plan — it should show no changes (or only expected drift)
   > **Important**: Atlantis must remain frozen from step 1 through the end of verification (step 8). An Atlantis apply between state download and TFC upload would leave TFC with a stale snapshot.
 
 ### Acceptance Criteria
 
-- [ ] Workspaces appear in `gcp-hcp-integration` TFC project
-- [ ] Each workspace has WIF variables inherited from the project-level variable set
-- [ ] Provider blocks include `user_project_override = true` and `billing_project` (merged before state seeding)
-- [ ] Each workspace with existing infrastructure has state seeded from GCS (resource count matches)
-- [ ] Speculative plans run on PR pushes (from upstream branches — not forks, see [Workflow Fit](#1-workflow-fit))
+- [x] Workspaces appear in `gcp-hcp-integration` TFC project
+- [x] Each workspace has WIF variables inherited from the project-level variable set
+- [x] Provider blocks include `user_project_override = true` and `billing_project` (merged before state seeding)
+- [x] Each workspace with existing infrastructure has state seeded from GCS (resource count matches)
+- [x] Speculative plans run on PR pushes (from upstream branches — not forks, see [Workflow Fit](#1-workflow-fit))
 
 ---
 
-## Story 5: Validation and Cutover (Integration)
+## Story 5: Validation and Cutover (Integration) — ✅ Complete ([GCP-951](https://redhat.atlassian.net/browse/GCP-951), Closed 2026-08-20)
 
 ### Summary
 
@@ -308,31 +310,31 @@ Validate that TFC can manage the same infrastructure as Atlantis with the same o
 
 ### Tasks
 
-- [ ] **Plan comparison**: Run TFC plan on each workspace, compare with latest Atlantis plan — outputs should be identical (no-op or same diff)
-- [ ] **Small change test**: Apply a minor change (e.g., add a resource label) via TFC on one workspace
-- [ ] **State consistency**: Verify TFC-seeded state matches the GCS state (resource count, serial number)
-- [ ] **Cross-project operations**: Verify region workspace can create IAM bindings on the global project (via `modules/region/global-iam.tf`) — this is the key operation that validates the cross-project IAM grants
-- [ ] **Plan SA isolation**: Verify speculative plans succeed with view-only plan SA (no write operations attempted during plan)
-- [ ] **API activation**: Verify `user_project_override = true` resolves quota project errors — plans should not fail with "API has not been used in project" errors
-- [ ] **Cutover per workspace** (after validation passes):
+- [x] **Plan comparison**: Run TFC plan on each workspace, compare with latest Atlantis plan — outputs should be identical (no-op or same diff)
+- [x] **Small change test**: Apply a minor change (e.g., add a resource label) via TFC on one workspace
+- [x] **State consistency**: Verify TFC-seeded state matches the GCS state (resource count, serial number)
+- [x] **Cross-project operations**: Verify region workspace can create IAM bindings on the global project (via `modules/region/global-iam.tf`) — this is the key operation that validates the cross-project IAM grants
+- [x] **Plan SA isolation**: Verify speculative plans succeed using the plan SA's unified (write-capable) roles from Story 2 — `terraform plan` does not call write APIs even though the SA has permission to, so no destructive actions occur during a plan run
+- [x] **API activation**: Verify `user_project_override = true` resolves quota project errors — plans should not fail with "API has not been used in project" errors
+- [x] **Cutover per workspace** (after validation passes):
   1. Disable Atlantis autoplan for the workspace (remove entry from `atlantis-integration.yaml`)
-  2. Set `auto_apply = true` in the workspace definition (`hcp-terraform/gcp-hcp-int/main.tf`) so TFC auto-applies on merge to main, matching Atlantis behavior
+  2. Set `auto_apply = true` in the workspace definition (`hcp-terraform/gcp-hcp-integration/main.tf`) so TFC auto-applies on merge to main, matching Atlantis behavior
   3. Merge the `auto_apply` change — TFC applies it via the meta workspace
   4. Verify the next merge-to-main triggers an automatic apply (no manual confirmation needed in TFC UI)
-- [ ] **Update Prow required status checks**: Remove Atlantis status checks (`atlantis-int/plan`, `atlantis-int/apply`) from the required checks on the `main` branch in [`openshift/release`](https://github.com/openshift/release/blob/main/core-services/prow/02_config/openshift-online/gcp-hcp-infra/_prowconfig.yaml). Without this, PRs to `gcp-hcp-infra` will be blocked because the removed Atlantis integration projects no longer report these statuses. Open a PR against `openshift/release` to update the Prow config. See [GCP-951](https://redhat.atlassian.net/browse/GCP-951).
+- [x] **Update Prow required status checks**: Remove Atlantis status checks (`atlantis-int/plan`, `atlantis-int/apply`) from the required checks on the `main` branch in [`openshift/release`](https://github.com/openshift/release/blob/main/core-services/prow/02_config/openshift-online/gcp-hcp-infra/_prowconfig.yaml). Without this, PRs to `gcp-hcp-infra` will be blocked because the removed Atlantis integration projects no longer report these statuses. Open a PR against `openshift/release` to update the Prow config. See [GCP-951](https://redhat.atlassian.net/browse/GCP-951).
 
 ### Acceptance Criteria
 
-- [ ] TFC plan output matches Atlantis for all integration workspaces
-- [ ] At least one apply completes successfully via TFC
-- [ ] Cross-project IAM operations work from region and MC workspaces
-- [ ] No "API has not been used in project" errors during plans or applies
-- [ ] Each validated workspace has `auto_apply = true` and its Atlantis autoplan entry removed
-- [ ] Prow required status checks updated to remove Atlantis checks for the cutover environment
+- [x] TFC plan output matches Atlantis for all integration workspaces
+- [x] At least one apply completes successfully via TFC
+- [x] Cross-project IAM operations work from region and MC workspaces
+- [x] No "API has not been used in project" errors during plans or applies
+- [x] Each validated workspace has `auto_apply = true` and its Atlantis autoplan entry removed
+- [x] Prow required status checks updated to remove Atlantis checks for the cutover environment
 
 ---
 
-## Story 6: Scripts and Tooling
+## Story 6: Scripts and Tooling — 🟡 Scripts done, docs pending ([GCP-952](https://redhat.atlassian.net/browse/GCP-952))
 
 ### Summary
 
@@ -342,7 +344,7 @@ Extend automation tooling for TFC workspace generation and update design docs.
 
 ### Tasks
 
-- [ ] Extend `scripts/infra.py` to generate TFC workspace entries:
+- [x] Extend `scripts/infra.py` to generate TFC workspace entries (delivered under [GCP-535](https://redhat.atlassian.net/browse/GCP-535), [PR #1270](https://github.com/openshift-online/gcp-hcp-infra/pull/1270)):
   - Add workspace entries to `hcp-terraform/gcp-hcp-{env}/main.tf` when creating new regions/MCs
   - Add plan/apply SA cross-project IAM to `tfc.tf` files in region/MC modules
   - Same gate: `environment in ['integration', 'stage', 'production'] and sector != 'e2e'`
@@ -352,12 +354,12 @@ Extend automation tooling for TFC workspace generation and update design docs.
 
 ### Acceptance Criteria
 
-- [ ] `scripts/infra.py new region {env} {sector} {region}` generates TFC workspace entry alongside Atlantis project entry
-- [ ] Generated IAM includes both plan and apply SA bindings
+- [x] `scripts/infra.py new region {env} {sector} {region}` generates TFC workspace entry alongside Atlantis project entry (GCP-535)
+- [x] Generated IAM includes both plan and apply SA bindings (GCP-535)
 
 ---
 
-## Story 7: Repeat for Stage
+## Story 7: Repeat for Stage — 🔲 Not started ([GCP-953](https://redhat.atlassian.net/browse/GCP-953))
 
 Same as Stories 1–5 for the stage environment:
 
@@ -368,7 +370,7 @@ Same as Stories 1–5 for the stage environment:
 
 ---
 
-## Story 8: Production Rollout
+## Story 8: Production Rollout — 🔲 Not started ([GCP-953](https://redhat.atlassian.net/browse/GCP-953))
 
 ### Summary
 
@@ -390,7 +392,7 @@ Production introduces additional considerations not present in integration/stage
 
 ---
 
-## Story 9: Cutover and Decommission Atlantis
+## Story 9: Cutover and Decommission Atlantis — 🔲 Not started ([GCP-954](https://redhat.atlassian.net/browse/GCP-954))
 
 ### Summary
 
@@ -419,14 +421,16 @@ Disable Atlantis and remove its infrastructure after TFC is validated in integra
 
 ## PR Sequence (Integration)
 
-| # | Story | PR | Applied By | Depends On |
-|---|---|---|---|---|
-| 1 | Access project bootstrap | Local apply (no PR) | Operator | — |
-| 2 | Cross-project IAM | `gcp-hcp-infra` PR | Atlantis | Story 1 |
-| 3 | Commons grants | `gcp-hcp-infra` PR | SRE manual | Story 1 |
-| 4 | Workspace definitions | `gcp-hcp-infra` PR | TFC meta workspace | Stories 1, 2, 3 |
-| 5 | Validation | Manual testing | — | Stories 2, 3, 4 |
-| 6 | Scripts & tooling | `gcp-hcp-infra` + `gcp-hcp` PRs | N/A (tooling) | Story 4 |
+| # | Story | PR | Applied By | Depends On | Status |
+|---|---|---|---|---|---|
+| 1 | Access project bootstrap | Local apply (no PR) | Operator | — | ✅ Done |
+| 2 | Cross-project IAM | `gcp-hcp-infra` PR | Atlantis | Story 1 | ✅ Done |
+| 3 | Commons grants | `gcp-hcp-infra` PR | SRE manual | Story 1 | ✅ Done |
+| 4 | Workspace definitions | `gcp-hcp-infra` PR | TFC meta workspace | Stories 1, 2, 3 | ✅ Done |
+| 5 | Validation | Manual testing | — | Stories 2, 3, 4 | ✅ Done (GCP-951) |
+| 6 | Scripts & tooling | `gcp-hcp-infra` + `gcp-hcp` PRs | N/A (tooling) | Story 4 | 🟡 Scripts done, docs pending (GCP-952) |
+| 7-8 | Stage & production rollout | — | — | Story 5 | 🔲 Not started (GCP-953) |
+| 9 | Atlantis decommission | — | — | Stories 5, 7, 8 | 🔲 Not started (GCP-954) |
 
 Stories 2 and 3 can run in parallel (both depend only on Story 1).
 
@@ -446,24 +450,26 @@ Stories 2 and 3 can run in parallel (both depend only on Story 1).
 | Incomplete trigger prefixes miss shared module changes | Include shared module paths (`terraform/modules/{type}/`) in workspace trigger prefixes alongside config-specific paths |
 | Atlantis required status checks block PRs after cutover | Prow config in `openshift/release` defines `atlantis-{env}/plan` and `atlantis-{env}/apply` as required checks on `main`. After removing Atlantis projects, these checks never report, blocking all merges. Update Prow config per environment as part of the cutover (Story 5). PR against [`openshift/release`](https://github.com/openshift/release/blob/main/core-services/prow/02_config/openshift-online/gcp-hcp-infra/_prowconfig.yaml) |
 
-## CI Workspaces (Deferred)
+## Remaining Atlantis Projects (Not Yet Migrated)
 
-`hypershift-ci` targets a single GCP project. `platform-ci` creates region and management-cluster projects, so it has the same cross-project IAM requirements as environment workspaces — the same access project pattern applies. Two options under evaluation:
+`terraform/atlantis-integration.yaml` still lists 4 projects beyond global/region/MC. None of these were in the epic's original scope — `hypershift-ci` was listed but explicitly deferred ("planned separately after environment workspaces are validated," a milestone now complete via GCP-951); `platform-ci`, `service`, and `pagerduty` were added to Atlantis after the epic was written and were never scoped at all. Each has been ticketed with a target TFC project:
 
-- `gcp-dynamic-creds` module (same access project pattern)
-- Extend existing Prow WIF pools with a TFC OIDC provider
+| Project | Target TFC Project | Notes | Ticket |
+|---|---|---|---|
+| `hypershift-ci` | `gcp-hcp-ci` (existing, access project already bootstrapped) | Coordination with Jim resolved — deletion protection already disabled for `gcp-hcp-ci` via infra-platform repo config, and Jim's e2e cleanup automation deletes by tag rather than naming pattern, so it won't sweep up persistent workspaces. Confirm the specific tag his automation targets at implementation time so these workspaces' tags avoid it | [GCP-1093](https://redhat.atlassian.net/browse/GCP-1093) |
+| `platform-ci` | `gcp-hcp-ci` (same as above) | Same as above | [GCP-1093](https://redhat.atlassian.net/browse/GCP-1093) |
+| `service` | `gcp-hcp-service` (new, dedicated) | Needs its own access-project bootstrap (Story-1 equivalent); also resolves its stale `backend = "gcs"` read of `global`'s state (Finding #9) | [GCP-1092](https://redhat.atlassian.net/browse/GCP-1092) |
+| `pagerduty` | `gcp-hcp-tooling` (new) | No `google` resources, but its provider reads the PagerDuty API token from a Secret Manager secret in `gcp-hcp-int-global` — needs a minimal cross-project `secretmanager.secretAccessor` grant, not a full WIF bootstrap | [GCP-1094](https://redhat.atlassian.net/browse/GCP-1094) |
 
-CI workspace migration will be planned separately after environment workspaces are validated.
+`gcp-hcp-ci` already exists as a TFC project (access project `gcp-hcp-ci-tfc-access` bootstrapped) but its `workspaces` map is currently empty — Jim uses it for ephemeral e2e workspaces, hypershift-ci/platform-ci will be added as persistent workspaces alongside those, unblocked per the coordination above.
 
-## PagerDuty
-
-PagerDuty uses a PagerDuty API key — no GCP IAM needed. Migrated to TFC as a standalone workspace in `gcp-hcp-tooling` with no WIF configuration.
+`gcp-hcp-service` and `gcp-hcp-tooling` do not exist yet.
 
 ---
 
 ## Migration Findings
 
-Workspace migrations uncovered several undocumented requirements. The first batch came from `gcp-hcp-global-integration` ([GCP-534](https://redhat.atlassian.net/browse/GCP-534), [PR #1070](https://github.com/openshift-online/gcp-hcp-infra/pull/1070)). Finding #6 was discovered during the region/MC integration cutover ([GCP-951](https://redhat.atlassian.net/browse/GCP-951)). These findings have been integrated into the stories above and are summarized here for reference.
+Workspace migrations uncovered several undocumented requirements. The first batch came from `gcp-hcp-global-integration` ([GCP-534](https://redhat.atlassian.net/browse/GCP-534), [PR #1070](https://github.com/openshift-online/gcp-hcp-infra/pull/1070)). Finding #6 was discovered during the region/MC integration cutover ([GCP-951](https://redhat.atlassian.net/browse/GCP-951)). Findings 7-10 surfaced during the [GCP-535](https://redhat.atlassian.net/browse/GCP-535) region/MC onboarding automation work (us-west1 and us-south1 bootstrap, Aug 2026). These findings have been integrated into the stories above and are summarized here for reference.
 
 | # | Finding | Impact | Resolution | Reference |
 |---|---------|--------|------------|-----------|
@@ -473,3 +479,9 @@ Workspace migrations uncovered several undocumented requirements. The first batc
 | 4 | Workspaces created with `auto_apply = false` need explicit enablement after cutover | Merges to main do not auto-apply until flag is set | Enable `auto_apply = true` per workspace after validation | Story 5, [GCP-951](https://redhat.atlassian.net/browse/GCP-951) |
 | 5 | Trigger prefixes missing shared module paths | Changes to shared modules do not trigger plans in dependent workspaces | Add `terraform/modules/{type}/` to trigger prefixes | Story 4 |
 | 6 | Prow required status checks reference Atlantis projects that no longer exist after cutover | PRs blocked from merging because `atlantis-{env}/plan` and `atlantis-{env}/apply` never report | Update Prow config in `openshift/release` to remove Atlantis checks per environment | Story 5, [GCP-951](https://redhat.atlassian.net/browse/GCP-951) |
+| 7 | HCP Terraform denies cross-workspace `terraform_remote_state` reads by default (no `remote_state_consumer_ids` grant) | A management-cluster workspace reading its region's TFC-native state fails until explicitly granted as a consumer | Added a `remote_state_consumers` input to the `workspaces/tfe` module, wired to `remote_state_consumer_ids` on `tfe_workspace_settings` | [infra-platform#164](https://github.com/openshift-online/infra-platform/pull/164)/[#166](https://github.com/openshift-online/infra-platform/pull/166), [GCP-1069](https://redhat.atlassian.net/browse/GCP-1069) |
+| 8 | A region bootstrapped **TFC-only from creation** (no prior Atlantis) never writes state to GCS at all — its `backend "gcs"` block is dead code from day one, not just stale | Dependent configs reading `data.terraform_remote_state.region` via `backend = "gcs"` get `"object with no attributes"` — a harder failure than finding #1, since there's no snapshot to seed from | Switch the consumer's remote-state read to `backend = "remote"` (TFC-native) plus the consumer grant from finding #7 | [GCP-1069](https://redhat.atlassian.net/browse/GCP-1069), [PR #1287](https://github.com/openshift-online/gcp-hcp-infra/pull/1287) |
+| 9 | Once a producer workspace's state migrates to TFC, its GCS object is frozen at migration day — any remaining `backend = "gcs"` consumer reads go stale silently, no error | Confirmed live drift on real workspaces: global's GCS snapshot was missing an entire region's `monitored_projects` entries; region's GCS snapshot was 12 applies behind TFC | Retroactively switched every remaining `backend = "gcs"` consumer read to `backend = "remote"` + consumer grant. **Sequencing rule for stage/prod**: never leave a consumer on `backend = "gcs"` after its producer cuts over to TFC — the backend cutover for consumers must happen as part of the same change that migrates the producer's state, not after | [PR #1362](https://github.com/openshift-online/gcp-hcp-infra/pull/1362)/[#1363](https://github.com/openshift-online/gcp-hcp-infra/pull/1363) |
+| 10 | OPA deletion-approval lists are hand-maintained per teardown and silently go stale across `workspaces/tfe` module version bumps (e.g. `tfe_workspace_settings` added in v0.0.12) | A teardown's meta-workspace apply **stalls indefinitely** at `post_plan_awaiting_decision` instead of erroring — easy to miss, no alert | Manually add the missing deletion-approval entry per resource added by the module upgrade; no automated detection yet | [PR #1247](https://github.com/openshift-online/gcp-hcp-infra/pull/1247) |
+
+> **Resolved, no longer a concern**: an earlier IAM self-grant propagation race during greenfield bootstrap (`tfc_iam_ready` barrier not wired into all resources, [PR #1205](https://github.com/openshift-online/gcp-hcp-infra/pull/1205)/[#1216](https://github.com/openshift-online/gcp-hcp-infra/pull/1216)) was fixed upstream in the module. Sequential region-then-MC bootstrap via `infra.py` is validated working; concurrent bootstrap of multiple regions has not been tested.
