@@ -6,7 +6,7 @@ Migrate infrastructure automation from self-hosted Atlantis to HCP Terraform Clo
 
 Integration environment first, then stage. Production does not have Atlantis today, so TFC will be the first automation there.
 
-**Status (2026-08-20)**: Stories 1–5 are complete for integration — `terraform/atlantis-integration.yaml` no longer lists `global`, `region`, or `management-cluster` projects, all three run on TFC with `auto_apply = true` (validated in [GCP-951](https://redhat.atlassian.net/browse/GCP-951), now Closed). Region/MC onboarding automation (Story 6 script work) shipped under [GCP-535](https://redhat.atlassian.net/browse/GCP-535). Remaining work: Story 6 doc finalization ([GCP-952](https://redhat.atlassian.net/browse/GCP-952)), Story 7/8 stage and production rollout ([GCP-953](https://redhat.atlassian.net/browse/GCP-953)), Story 9 decommission ([GCP-954](https://redhat.atlassian.net/browse/GCP-954)).
+**Status (2026-08-20)**: Stories 1–5 are complete for integration — `terraform/atlantis-integration.yaml` no longer lists `global`, `region`, or `management-cluster` projects, all three run on TFC with `auto_apply = true` (validated in [GCP-951](https://redhat.atlassian.net/browse/GCP-951), now Closed). Region/MC onboarding automation (Story 6 script work) shipped under [GCP-535](https://redhat.atlassian.net/browse/GCP-535). 4 Atlantis projects remain unmigrated — `hypershift-ci`, `platform-ci`, `service`, `pagerduty` — none were in the epic's original scope; see [Remaining Atlantis Projects](#remaining-atlantis-projects-not-yet-migrated) for target TFC projects and tracking tickets ([GCP-1092](https://redhat.atlassian.net/browse/GCP-1092), [GCP-1093](https://redhat.atlassian.net/browse/GCP-1093), [GCP-1094](https://redhat.atlassian.net/browse/GCP-1094)). Also remaining: Story 6 doc finalization ([GCP-952](https://redhat.atlassian.net/browse/GCP-952)), Story 7/8 stage and production rollout ([GCP-953](https://redhat.atlassian.net/browse/GCP-953)), Story 9 decommission ([GCP-954](https://redhat.atlassian.net/browse/GCP-954)).
 
 **Epic**: [GCP-532](https://redhat.atlassian.net/browse/GCP-532) - Terraform Cloud Evaluation & Plan
 
@@ -450,18 +450,20 @@ Stories 2 and 3 can run in parallel (both depend only on Story 1).
 | Incomplete trigger prefixes miss shared module changes | Include shared module paths (`terraform/modules/{type}/`) in workspace trigger prefixes alongside config-specific paths |
 | Atlantis required status checks block PRs after cutover | Prow config in `openshift/release` defines `atlantis-{env}/plan` and `atlantis-{env}/apply` as required checks on `main`. After removing Atlantis projects, these checks never report, blocking all merges. Update Prow config per environment as part of the cutover (Story 5). PR against [`openshift/release`](https://github.com/openshift/release/blob/main/core-services/prow/02_config/openshift-online/gcp-hcp-infra/_prowconfig.yaml) |
 
-## CI Workspaces (Deferred)
+## Remaining Atlantis Projects (Not Yet Migrated)
 
-`hypershift-ci` targets a single GCP project. `platform-ci` creates region and management-cluster projects, so it has the same cross-project IAM requirements as environment workspaces — the same access project pattern applies. Two options under evaluation:
+`terraform/atlantis-integration.yaml` still lists 4 projects beyond global/region/MC. None of these were in the epic's original scope — `hypershift-ci` was listed but explicitly deferred ("planned separately after environment workspaces are validated," a milestone now complete via GCP-951); `platform-ci`, `service`, and `pagerduty` were added to Atlantis after the epic was written and were never scoped at all. Each has been ticketed with a target TFC project:
 
-- `gcp-dynamic-creds` module (same access project pattern)
-- Extend existing Prow WIF pools with a TFC OIDC provider
+| Project | Target TFC Project | Notes | Ticket |
+|---|---|---|---|
+| `hypershift-ci` | `gcp-hcp-ci` (existing, access project already bootstrapped) | Blocked on coordinating with Jim — `gcp-hcp-ci` is actively used for ephemeral e2e test workspaces, need to confirm no policy/naming conflict | [GCP-1093](https://redhat.atlassian.net/browse/GCP-1093) |
+| `platform-ci` | `gcp-hcp-ci` (same as above) | Same coordination requirement | [GCP-1093](https://redhat.atlassian.net/browse/GCP-1093) |
+| `service` | `gcp-hcp-service` (new, dedicated) | Needs its own access-project bootstrap (Story-1 equivalent); also resolves its stale `backend = "gcs"` read of `global`'s state (Finding #9) | [GCP-1092](https://redhat.atlassian.net/browse/GCP-1092) |
+| `pagerduty` | `gcp-hcp-tooling` (new) | No `google` resources, but its provider reads the PagerDuty API token from a Secret Manager secret in `gcp-hcp-int-global` — needs a minimal cross-project `secretmanager.secretAccessor` grant, not a full WIF bootstrap | [GCP-1094](https://redhat.atlassian.net/browse/GCP-1094) |
 
-CI workspace migration will be planned separately after environment workspaces are validated.
+`gcp-hcp-ci` already exists as a TFC project (access project `gcp-hcp-ci-tfc-access` bootstrapped) but its `workspaces` map is currently empty — Jim uses it for ephemeral e2e workspaces, hypershift-ci/platform-ci will be added as persistent workspaces alongside those.
 
-## PagerDuty
-
-PagerDuty uses a PagerDuty API key — no GCP IAM needed. Migrated to TFC as a standalone workspace in `gcp-hcp-tooling` with no WIF configuration.
+`gcp-hcp-service` and `gcp-hcp-tooling` do not exist yet.
 
 ---
 
