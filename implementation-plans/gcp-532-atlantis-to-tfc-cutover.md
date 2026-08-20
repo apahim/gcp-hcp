@@ -75,8 +75,8 @@ For existing infrastructure currently managed by Atlantis (global, region, MC), 
 1. Freeze Atlantis for the workspace (disable the autoplan entry in `atlantis-{env}.yaml` or drain in-flight operations) to prevent state changes during the migration window
 2. Lock the TFC workspace (API or UI)
 3. Download the current state from GCS (`gsutil cp gs://{bucket}/{workspace}.tfstate .`)
-4. Upload the state to TFC via the [State Versions API](https://developer.hashicorp.com/terraform/cloud-docs/api-docs/state-versions): base64-encode the state JSON, compute its MD5 hash, POST to `/workspaces/{id}/state-versions`
-5. Verify the state in the TFC UI (resource count matches expectations)
+4. Upload the state to TFC via the [State Versions API](https://developer.hashicorp.com/terraform/cloud-docs/api-docs/state-versions): `POST /workspaces/{id}/state-versions` with `data.type = "state-versions"`, `data.attributes.serial` (matching the state file's serial), `data.attributes.md5`, and either the base64-encoded `data.attributes.state` or the hosted-upload-url flow
+5. Poll until `status = "finalized"` and verify in the TFC UI that resource count matches expectations — do not proceed while still `pending`
 6. Unlock the workspace
 7. Securely delete the downloaded `.tfstate` file from the operator's workstation (it may contain sensitive resource attributes)
 
@@ -284,8 +284,8 @@ Create TFC workspaces mirroring the Atlantis projects in `atlantis-integration.y
   2. Lock the TFC workspace via API
   3. Download the current state from GCS: `gsutil cp gs://{state-bucket}/{workspace}.tfstate .`
   4. Base64-encode the state JSON and compute its MD5 hash
-  5. Upload to TFC via the [State Versions API](https://developer.hashicorp.com/terraform/cloud-docs/api-docs/state-versions): `POST /workspaces/{id}/state-versions`
-  6. Verify in TFC UI that resource count matches the GCS state
+  5. Upload to TFC via the [State Versions API](https://developer.hashicorp.com/terraform/cloud-docs/api-docs/state-versions): `POST /workspaces/{id}/state-versions` with `data.type = "state-versions"`, `data.attributes.serial` (matching the state file's serial), `data.attributes.md5`, and either the base64-encoded `data.attributes.state` or the hosted-upload-url flow
+  6. Poll until `status = "finalized"` and verify in TFC UI that resource count matches the GCS state — do not proceed while still `pending`
   7. Unlock the workspace
   8. Run a speculative plan — it should show no changes (or only expected drift)
   > **Important**: Atlantis must remain frozen from step 1 through the end of verification (step 8). An Atlantis apply between state download and TFC upload would leave TFC with a stale snapshot.
@@ -314,7 +314,7 @@ Validate that TFC can manage the same infrastructure as Atlantis with the same o
 - [x] **Small change test**: Apply a minor change (e.g., add a resource label) via TFC on one workspace
 - [x] **State consistency**: Verify TFC-seeded state matches the GCS state (resource count, serial number)
 - [x] **Cross-project operations**: Verify region workspace can create IAM bindings on the global project (via `modules/region/global-iam.tf`) — this is the key operation that validates the cross-project IAM grants
-- [x] **Plan SA isolation**: Verify speculative plans succeed with view-only plan SA (no write operations attempted during plan)
+- [x] **Plan SA isolation**: Verify speculative plans succeed using the plan SA's unified (write-capable) roles from Story 2 — `terraform plan` does not call write APIs even though the SA has permission to, so no destructive actions occur during a plan run
 - [x] **API activation**: Verify `user_project_override = true` resolves quota project errors — plans should not fail with "API has not been used in project" errors
 - [x] **Cutover per workspace** (after validation passes):
   1. Disable Atlantis autoplan for the workspace (remove entry from `atlantis-integration.yaml`)
