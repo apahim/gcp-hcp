@@ -456,12 +456,12 @@ Stories 2 and 3 can run in parallel (both depend only on Story 1).
 
 | Project | Target TFC Project | Notes | Ticket |
 |---|---|---|---|
-| `hypershift-ci` | `gcp-hcp-ci` (existing, access project already bootstrapped) | Blocked on coordinating with Jim — `gcp-hcp-ci` is actively used for ephemeral e2e test workspaces, need to confirm no policy/naming conflict | [GCP-1093](https://redhat.atlassian.net/browse/GCP-1093) |
-| `platform-ci` | `gcp-hcp-ci` (same as above) | Same coordination requirement | [GCP-1093](https://redhat.atlassian.net/browse/GCP-1093) |
+| `hypershift-ci` | `gcp-hcp-ci` (existing, access project already bootstrapped) | Coordination with Jim resolved — deletion protection already disabled for `gcp-hcp-ci` via infra-platform repo config, and Jim's e2e cleanup automation deletes by tag rather than naming pattern, so it won't sweep up persistent workspaces. Confirm the specific tag his automation targets at implementation time so these workspaces' tags avoid it | [GCP-1093](https://redhat.atlassian.net/browse/GCP-1093) |
+| `platform-ci` | `gcp-hcp-ci` (same as above) | Same as above | [GCP-1093](https://redhat.atlassian.net/browse/GCP-1093) |
 | `service` | `gcp-hcp-service` (new, dedicated) | Needs its own access-project bootstrap (Story-1 equivalent); also resolves its stale `backend = "gcs"` read of `global`'s state (Finding #9) | [GCP-1092](https://redhat.atlassian.net/browse/GCP-1092) |
 | `pagerduty` | `gcp-hcp-tooling` (new) | No `google` resources, but its provider reads the PagerDuty API token from a Secret Manager secret in `gcp-hcp-int-global` — needs a minimal cross-project `secretmanager.secretAccessor` grant, not a full WIF bootstrap | [GCP-1094](https://redhat.atlassian.net/browse/GCP-1094) |
 
-`gcp-hcp-ci` already exists as a TFC project (access project `gcp-hcp-ci-tfc-access` bootstrapped) but its `workspaces` map is currently empty — Jim uses it for ephemeral e2e workspaces, hypershift-ci/platform-ci will be added as persistent workspaces alongside those.
+`gcp-hcp-ci` already exists as a TFC project (access project `gcp-hcp-ci-tfc-access` bootstrapped) but its `workspaces` map is currently empty — Jim uses it for ephemeral e2e workspaces, hypershift-ci/platform-ci will be added as persistent workspaces alongside those, unblocked per the coordination above.
 
 `gcp-hcp-service` and `gcp-hcp-tooling` do not exist yet.
 
