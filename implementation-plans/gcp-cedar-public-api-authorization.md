@@ -16,20 +16,24 @@ This implements the architecture decided in [cedar-public-api-authorization](../
 |---|---|
 | Authorization engine | Cedar (`cedar-go`), in-process evaluation |
 | User identity source | `X-Endpoint-API-UserInfo` header (base64 JWT claims injected by ESPv2 sidecar) |
+| Trusted proxy boundary | Public API backend listener reachable only through ESPv2 sidecar; direct access blocked by network topology |
 | Principal key | Email claim (e.g., `User::"alice@example.com"`) |
+| Principal validation | Non-empty `email` required; `email_verified == true` required when available; NFC Unicode normalization + lowercase domain + preserved local-part case |
 | API types | `PlatformRole` (cluster-scoped), `Role` (namespaced), `RoleBinding` (namespaced) |
 | System role seeding | Helm chart templates for PlatformRole CRDs, deployed via ArgoCD |
 | PlatformRole public API | None — no `platformrole.*` permissions exist; CRUD is via private API only |
 | Cedar conditions | On `RoleBinding.spec.condition` (not on Role), enabling per-user ABAC |
+| Object-state ABAC | Authorization evaluates Cedar against effective resource state: decoded body for creates, stored object for reads/deletes, post-update state for updates |
 | Policy generation | Per-binding with explicit namespace pins |
-| Grant constraints | Relaxed: no self-grant prevention, no infrastructure-role restriction |
-| Validation | Referenced role existence, Cedar condition syntax, `Namespace::` traversal rejection |
+| Grant constraints | Relaxed: no self-grant prevention. `service-admin` can bind infrastructure roles within the namespace (intentional namespace-local privilege escalation). |
+| Validation | Referenced role existence, Cedar condition syntax, `Namespace::` traversal rejection, subject normalization |
 | Entity model | 3 types: User, NamespaceRole, Namespace |
 | Entity cache | 1000-entry LRU, per-user invalidation on binding writes, full invalidation on role changes |
 | Cross-namespace list | Namespace-filter via `ListOptions.Namespaces` in storage layer (database-level filtering) + per-item `ItemFilter` for Cedar conditions |
-| Multi-resource conditions | `context.resourcePlural` guard required when condition targets a specific resource type |
-| Auth disable flag | `--disable-auth` covers both private and public APIs for local development |
-| Cross-region consistency | Via separate [cross-region resource replication](gcp-cross-region-resource-replication.md) mechanism |
+| Multi-resource conditions | `context.resourcePlural` guard required when condition targets a specific resource type (documented authoring requirement) |
+| Policy reload failure | Continue with last-known-good policy set, retry with backoff, fail closed if no valid policy exists |
+| Auth disable flag | `--disable-auth` skips authn/authz middleware for public API local development; separate dev-header mode may exist for testing with authz active |
+| Cross-region consistency | Via separate [cross-region resource replication](gcp-cross-region-resource-replication.md); authorization decisions based on local regional state, may lag during replication outages |
 
 ---
 
@@ -74,7 +78,7 @@ System roles are `PlatformRole` resources (cluster-scoped, `+kubebuilder:resourc
 | `cluster-viewer` | `cluster.list`, `cluster.get`, `nodepool.list`, `nodepool.get` |
 | `service-admin` | `rolebinding.create`, `rolebinding.list`, `rolebinding.get`, `rolebinding.update`, `rolebinding.delete`, `role.create`, `role.list`, `role.get`, `role.update`, `role.delete` |
 
-**Separation of concerns**: Access management (`service-admin`) is fully separated from infrastructure management (`cluster-admin`, `cluster-viewer`). No single role conflates both. A user who needs both access-management and infrastructure permissions requires multiple bindings.
+**Separation of concerns**: The default system roles separate access-management permissions (`service-admin`) from infrastructure permissions (`cluster-admin`, `cluster-viewer`). No single role conflates both capabilities. However, a `service-admin` can intentionally grant infrastructure roles to themselves or other users within the namespace because self-grant prevention is out of scope. This is namespace-local privilege escalation by design — `service-admin` is a highly privileged role that should be granted only to trusted namespace owners. Bootstrap and Marketplace flows rely on this trust model.
 
 ### Helm Template Format
 
@@ -165,22 +169,48 @@ type RoleRef struct {
 
 ## Authentication Middleware
 
+### Trust Boundary
+
+**Critical security requirement**: The public API backend listener must only be reachable through the ESPv2 sidecar proxy. Direct external access to the application container/port must be blocked by network topology (sidecar-to-app communication over localhost, or equivalent network isolation).
+
+The `X-Endpoint-API-UserInfo` header is trusted **only** when the request arrives through ESPv2. Any user-supplied `X-Endpoint-API-UserInfo` header must be stripped by ESPv2 configuration or rendered impossible by network topology. Failure to enforce this trust boundary allows trivial authentication bypass via header spoofing.
+
 ### Production Mode
 
 1. Read the `X-Endpoint-API-UserInfo` header (set by ESPv2 sidecar after JWT validation)
 2. Base64-decode (try raw URL encoding first, fall back to padded)
-3. Parse JSON and extract the `email` claim
-4. Normalize email: NFC unicode normalization, lowercase the domain part (after `@`), preserve local part case
-5. Store in request context via `authn.WithUser(ctx, email)`
-6. Missing, malformed, or empty-email cases return 401 Unauthorized
+3. Parse JSON and extract claims
+4. **Email claim validation**:
+   - Require non-empty `email` claim
+   - Require `email_verified == true` when the claim is present (ESPv2 forwards this claim from Google ID tokens)
+   - If `email_verified` is false or missing when expected, return `401 Unauthorized`
+5. **Email normalization** (must match RoleBinding subject normalization exactly):
+   - NFC Unicode normalization
+   - Lowercase the domain part (after `@`)
+   - Preserve local-part case
+6. Store normalized email in request context via `authn.WithUser(ctx, email)`
+7. **Failure cases return `401 Unauthorized`**:
+   - Missing `X-Endpoint-API-UserInfo` header
+   - Malformed base64 or JSON
+   - Empty or missing `email` claim
+   - `email_verified == false` (when claim is present)
 
-### Development Mode
+### Development Mode (Dev Header)
 
-1. Read the `X-Dev-User` header directly (no JWT validation)
-2. Missing header returns 401
-3. Normalize and store in context
+1. Read the `X-Dev-User` header directly (no JWT validation, no ESPv2)
+2. Missing header returns `401 Unauthorized`
+3. Normalize email using the same rules as production mode
+4. Store in context
+5. Authorization middleware remains active (conditions are evaluated)
 
-The `--disable-auth` flag activates development mode.
+### Disabled Auth Mode
+
+When `--disable-auth` flag is set:
+- Both authentication and authorization middleware are skipped entirely for the public API
+- No user identity extraction or policy evaluation occurs
+- **Security**: This mode is for local development only. Production deployments must never set this flag.
+
+**Deployment verification**: Startup tests and deployment checks verify that the public API backend listener is not directly reachable externally when `--disable-auth` is not set.
 
 ---
 
@@ -254,23 +284,48 @@ when {
 
 ### Condition Wrapping
 
-When a RoleBinding has a `condition` field, the policy generator wraps it:
+When a RoleBinding has a `condition` field, the policy generator wraps it to handle both namespace-level authorization (for list namespace discovery) and object-level authorization (for single-resource operations and per-item filtering):
 
 ```
-<base_condition> && (!(context has resourceName) || <user_condition>)
+<base_condition> && <user_condition>
 ```
 
-The `!(context has resourceName)` guard ensures that **list operations** (which have no `resourceName` in the Cedar context) are authorized at the namespace level. Per-item filtering then applies the condition to each individual result via the `ItemFilter` mechanism.
+**Important**: The condition is evaluated in two contexts:
+1. **Namespace-level authorization** (list namespace discovery): Cedar context contains only `resourcePlural` and `method`. The user condition must not reference `context.spec` or other object-specific fields in this phase, or use guards like `context has spec` to avoid evaluation errors.
+2. **Object-level authorization** (single-resource operations and per-item list filtering): Cedar context contains `resourceName`, `resourcePlural`, `method`, and `spec`. The user condition evaluates against the effective resource state.
+
+The implementation separates these phases:
+- List operations first perform namespace-level authorization to determine candidate namespaces (the condition should permit if object context is absent, or use `context has spec` guard).
+- Per-item filtering then evaluates the condition against each item's full object context via the `ItemFilter` mechanism.
+
+**Recommended condition pattern for ABAC on resource attributes**:
+```cedar
+!(context has spec) || context.spec.platform.gcp.region == "us-east1"
+```
+
+This permits namespace-level authorization (no `spec` available) and enforces the condition only when object state is available.
 
 ### Multi-Resource Condition Guard
 
 When a RoleBinding's condition targets a specific resource type (e.g., cluster attributes) but the referenced role grants permissions on multiple resource types (e.g., `cluster.get` and `nodepool.get`), the condition **must** use `context.resourcePlural` to scope itself:
 
-```
-context.resourcePlural != "clusters" || context.spec.platform.gcp.region == "us-east1"
+```cedar
+context.resourcePlural != "clusters" || (
+    !(context has spec) ||
+    (context.spec has platform &&
+     context.spec.platform has gcp &&
+     context.spec.platform.gcp.region == "us-east1")
+)
 ```
 
-This ensures the condition is only evaluated when accessing clusters, and does not spuriously deny nodepool access where the `spec.platform.gcp.region` path may not exist.
+This ensures:
+1. The condition is only evaluated when accessing clusters (`context.resourcePlural == "clusters"`)
+2. Namespace-level authorization is permitted (`!(context has spec)`)
+3. Object-level authorization checks the region attribute with safe path traversal (explicit `has` checks)
+
+Without the `context.resourcePlural` guard, accessing nodepools would spuriously deny because the `spec.platform.gcp.region` path does not exist on nodepool resources.
+
+**Validation and Enforcement**: The `context.resourcePlural` guard requirement is a **documented authoring requirement**. Validation does not structurally enforce it, but tests demonstrate that unsafe conditions (referencing resource-type-specific attributes without the guard) fail closed for unrelated resource types. Condition authors are responsible for following the recommended patterns.
 
 ### Policy IDs
 
@@ -278,13 +333,34 @@ Policy IDs are deterministic:
 - PlatformRole bindings: `platformrole:<roleName>:binding:<namespace>/<bindingName>`
 - Role bindings: `role:<roleName>:binding:<namespace>/<bindingName>`
 
-### Forbid Policies
+### Forbid Policies (Future Work)
 
-The policy set supports platform-level `forbid` policies for actions that must be universally denied regardless of role bindings. A matching `forbid` overrides any matching `permit` — Cedar evaluates all applicable policies and a single matching `forbid` produces Deny.
+Cedar's `forbid`-overrides-`permit` semantics provide architectural support for platform-level policies that universally deny certain actions regardless of role bindings. A single matching `forbid` policy produces Deny even if multiple `permit` policies match.
+
+**Status**: Forbid policies are **not implemented in the initial release**. The policy generator emits only `permit` policies derived from PlatformRole and Role bindings. Future platform forbid policies would require:
+
+- Source of truth (Helm-managed config, private API resource, or hardcoded policies)
+- Policy ID format and naming convention
+- Supported actions and resource patterns
+- Hot-reload trigger and deployment path
+- Operational ownership and emergency rollout/rollback process
+- Precedence and interaction tests with permit policies
+
+Until forbid policies are implemented, the authorization model provides default-deny security (users with no matching permit policies are denied) but does not support platform-enforced prohibitions that override user-defined roles.
 
 ### Hot-Reload
 
-`platform-api-server` watches PlatformRole, Role, and RoleBinding resources via the `ResourceStore` watch mechanism. On create, update, or delete of any watched resource:
+`platform-api-server` watches PlatformRole, Role, and RoleBinding resources via the `ResourceStore` watch mechanism. Each API server replica starts its own watcher to ensure all replicas observe policy and binding changes.
+
+#### Watch Setup
+
+- Each replica creates a watch for PlatformRole, Role, and RoleBinding using the shared `ResourceStore` instances
+- Watches must deliver events to all replicas, not just the replica that wrote the resource
+- Storage backend implementations (Spanner, PostgreSQL) must support global watch delivery across all clients
+
+#### Policy Reload on Resource Change
+
+On create, update, or delete of any watched resource:
 
 1. Load all PlatformRoles, Roles, and RoleBindings from the stores
 2. Generate the new `cedar.PolicySet` via `GeneratePolicies()`
@@ -292,6 +368,41 @@ The policy set supports platform-level `forbid` policies for actions that must b
 4. Invalidate the entity cache:
    - PlatformRole or Role change → invalidate all cached entries
    - RoleBinding change → invalidate only the affected user's cache entry (and the previous subject's entry if the subject changed during an update)
+
+#### Watch Failure and Recovery
+
+- **On watch error**: log error, increment metrics, retry with exponential backoff
+- **During watch failure**: continue using last-known-good policy set and entity cache
+- **Recovery**: when watch reconnects, trigger full policy reload to catch any missed events
+
+#### Periodic Resync Backstop
+
+Optional periodic policy and cache resync provides a safety backstop against missed watch events:
+
+- Configurable via `--authz-resync-interval` (e.g., `5m`, default disabled or `0`)
+- On each interval:
+  1. Reload all PlatformRoles, Roles, and RoleBindings from stores
+  2. Generate new `cedar.PolicySet`
+  3. Compare policy set version/hash with current; swap only if changed
+  4. Optionally invalidate entity cache (or use cache TTL)
+- Resync ensures bounded staleness even if watch delivery fails
+
+#### Reload Failure Policy
+
+- **Initial load at startup**: if policy generation fails, server fails to start (fail-fast)
+- **Subsequent reload failure**: 
+  - Retain last-known-good policy set
+  - Log error at ERROR level
+  - Increment `authz_policy_reload_errors_total` metric
+  - Retry on next watch event or resync interval
+  - If no last-known-good policy set exists (impossible after successful startup), fail closed
+
+#### Cross-Replica Consistency
+
+- ResourceStore watches deliver changes written through any replica and changes written by the cross-region replication receiver
+- All replicas converge to the same policy set (eventually consistent, bounded by watch delivery latency)
+- Cache invalidation is per-replica — each replica invalidates its own local cache on watch events
+- No shared state between replicas; each maintains independent policy set pointer and entity cache
 
 ---
 
@@ -305,6 +416,26 @@ The middleware parses Kubernetes API-style URL paths to extract:
 - **Resource name** (if present)
 
 Path canonicalization is applied to prevent traversal attacks (e.g., `/../` sequences).
+
+### ABAC Context Source by Operation
+
+Cedar policies with conditions require evaluating against effective resource state. The table below defines how the Cedar context is built for each operation type:
+
+| Operation | Source Of Cedar Context | Required Fields | Failure Behavior |
+|---|---|---|---|
+| `POST /namespaces/{ns}/{resource}` | Decoded request object from body | `resourceName` (from `metadata.name`), `resourcePlural`, `method`, `spec` | Malformed object → `400`; missing metadata.name → fail closed `403` |
+| `GET /namespaces/{ns}/{resource}/{name}` | Stored object fetched before authz | `resourceName`, `resourcePlural`, `method`, `spec` | Object not found → `404`; fetch error → fail closed `403` |
+| `PUT /namespaces/{ns}/{resource}/{name}` | Decoded replacement object from body | `resourceName`, `resourcePlural`, `method`, `spec` | Malformed object → `400`; context build failure → fail closed `403` |
+| `PATCH /namespaces/{ns}/{resource}/{name}` | Stored object after applying patch | `resourceName`, `resourcePlural`, `method`, `spec` | Fetch or patch merge error → fail closed `403` |
+| `DELETE /namespaces/{ns}/{resource}/{name}` | Stored object fetched before authz | `resourceName`, `resourcePlural`, `method`, `spec` | Object not found → `404`; fetch error → fail closed `403` |
+| Namespaced list (`GET /namespaces/{ns}/{resource}`) | Namespace-level authz (no object context) + per-item stored object context via `ItemFilter` | Per-item: `resourceName`, `resourcePlural`, `spec` | Namespace authz deny → `403`; per-item condition deny → filter item out |
+| Cross-namespace list (`GET /{resource}`) | Authorized namespace prefilter + per-item stored object context via `ItemFilter` | Per-item: `namespace`, `resourceName`, `resourcePlural`, `spec` | Empty authorized namespace set → return empty list (not `403`) |
+
+**Notes**:
+- `resourceName` for `POST` comes from `metadata.name` in the decoded request body. If `metadata.generateName` is used without `metadata.name`, the generated name must be determined before Cedar evaluation or conditions depending on resource name cannot be supported.
+- Conditions that reference `context.spec` attributes must not be bypassed by collection-level operations — list operations use a two-phase check (namespace-level authorization followed by per-item filtering).
+- For `PATCH`, the effective object state is the stored object after applying the patch using the same patch semantics as the handler (JSON Patch, JSON Merge Patch, or Strategic Merge Patch). Authorization is evaluated against the post-patch state, not the patch fragment.
+- Fail-closed behavior (`403`) applies when object context cannot be built for a conditioned authorization check. Unconditioned checks (namespace-level only) do not require object reads.
 
 ### Action Derivation Map
 
@@ -339,30 +470,89 @@ Health probes (`/healthz`, `/readyz`) are registered outside the middleware chai
 
 ### Authorization Strategies
 
-**Single-resource operations** (GET/POST/PUT/DELETE with resource name):
+Authorization strategies differ by operation type to correctly handle object-state-aware ABAC.
+
+#### Create Operations (`POST /namespaces/{ns}/{resource}`)
 
 1. Extract user from `authn.UserFromContext()`
 2. Derive Cedar action from HTTP method + URL structure
-3. Build Cedar context from request body (for POST/PUT/PATCH): `resourceName`, `resourcePlural`, `method`, and `spec` (full resource spec converted to Cedar Record)
-4. Read and restore the request body (the body must remain available for the handler)
-5. Call `authorizer.AuthorizeWithContext(ctx, user, action, namespace, cedarCtx)`
-6. Deny → 403 Forbidden
+3. Decode request body to extract resource object
+4. Build Cedar context: `resourceName` from `metadata.name`, `resourcePlural`, `method`, and `spec` (full resource spec converted to Cedar Record)
+5. Preserve request body for handler (buffer or re-encode after decoding)
+6. Call `authorizer.AuthorizeWithContext(ctx, user, action, namespace, cedarCtx)`
+7. Deny → `403 Forbidden`
+8. Missing `metadata.name` when condition evaluation requires it → fail closed with `403`
 
-**Namespaced list** (GET with namespace, no resource name):
+#### Read/Delete Existing Object (`GET`/`DELETE /namespaces/{ns}/{resource}/{name}`)
 
-1. Authorize at the namespace level without Cedar context (no `resourceName`)
-2. Inject an `ItemFilter` function into the context for per-item condition evaluation
-3. The handler calls the filter for each list item, excluding items where the filter returns false
+1. Extract user from `authn.UserFromContext()`
+2. Derive Cedar action from HTTP method + URL structure
+3. **Fetch stored object** from the database using the resource name and namespace
+4. If object not found → `404 Not Found` (existence check happens before authz)
+5. Build Cedar context: `resourceName`, `resourcePlural`, `method`, and `spec` from the stored object
+6. Call `authorizer.AuthorizeWithContext(ctx, user, action, namespace, cedarCtx)`
+7. Deny → `403 Forbidden`
+8. Fetch error → fail closed with `403`
 
-**Cross-namespace list** (GET without namespace, e.g., `GET /clusters`):
+**Note**: For unconditioned authorization (no RoleBinding conditions), the object fetch can be skipped. The middleware should optimize by checking whether any applicable binding has a condition before fetching.
 
-1. Detect cross-namespace list (namespaced resource, no namespace param, GET method)
-2. Pre-compute the authorized namespace set from the user's RoleBindings whose referenced role grants the requested action's permission
-3. Inject the namespace set into the request context
-4. The handler reads authorized namespaces from context and sets `ListOptions.Namespaces`
-5. The storage layer filters at the database level
-6. Inject an `ItemFilter` for per-item Cedar condition evaluation
-7. A cross-namespace list **never returns 403** — an empty authorized namespace set produces an empty result list
+#### Full Replacement Update (`PUT /namespaces/{ns}/{resource}/{name}`)
+
+1. Extract user from `authn.UserFromContext()`
+2. Derive Cedar action from HTTP method + URL structure
+3. Decode request body to extract replacement object
+4. Build Cedar context: `resourceName`, `resourcePlural`, `method`, and `spec` from the decoded object
+5. Preserve request body for handler
+6. Call `authorizer.AuthorizeWithContext(ctx, user, action, namespace, cedarCtx)`
+7. Deny → `403 Forbidden`
+8. Malformed object → `400 Bad Request`
+
+#### Partial Update (`PATCH /namespaces/{ns}/{resource}/{name}`)
+
+1. Extract user from `authn.UserFromContext()`
+2. Derive Cedar action from HTTP method + URL structure
+3. **Fetch stored object** from the database
+4. **Apply patch** using the same patch semantics as the handler (JSON Patch, JSON Merge Patch, or Strategic Merge Patch depending on `Content-Type`)
+5. Build Cedar context from the **post-patch object**: `resourceName`, `resourcePlural`, `method`, and `spec`
+6. Preserve original patch body for handler
+7. Call `authorizer.AuthorizeWithContext(ctx, user, action, namespace, cedarCtx)`
+8. Deny → `403 Forbidden`
+9. Fetch or patch merge error → fail closed with `403`
+
+**Note**: Authorization evaluates the effective post-patch state, not the patch fragment. This prevents partial updates from bypassing conditioned authorization.
+
+#### Namespaced List (`GET /namespaces/{ns}/{resource}`)
+
+1. Extract user from `authn.UserFromContext()`
+2. Derive Cedar action from HTTP method + URL structure
+3. **Namespace-level authorization**: call `authorizer.Authorize(ctx, user, action, namespace)` without Cedar context (no `resourceName` or `spec`)
+4. Deny → `403 Forbidden`
+5. **Inject `ItemFilter` function** into the context for per-item condition evaluation
+6. Handler fetches list from database
+7. Handler calls `ItemFilter(ctx, item)` for each item:
+   - Build Cedar context from item: `resourceName`, `resourcePlural`, `spec`
+   - Evaluate Cedar policies with object context
+   - Filter out denied items
+8. Return filtered list
+
+#### Cross-Namespace List (`GET /{resource}`)
+
+1. Extract user from `authn.UserFromContext()`
+2. Derive Cedar action from HTTP method + URL structure
+3. Detect cross-namespace list (namespaced resource, no namespace param)
+4. **Pre-compute authorized namespace set**:
+   - Query user's RoleBindings
+   - For each binding, check if the referenced role grants the requested action's permission
+   - Collect namespaces from matching bindings (ignore conditions at this stage)
+5. **Inject authorized namespaces** into the request context
+6. **Inject `ItemFilter` function** for per-item condition evaluation
+7. Handler reads authorized namespaces from context and sets `ListOptions.Namespaces`
+8. Storage layer filters at the database level (`WHERE namespace IN (...)`)
+9. Handler calls `ItemFilter(ctx, item)` for each item to apply conditions
+10. Return filtered list
+11. **Never returns `403`** — empty authorized namespace set produces empty list
+
+**Note**: Cross-namespace lists use a two-phase approach: namespace prefiltering (database-level) followed by per-item condition filtering (application-level).
 
 ### Cedar Context
 
@@ -408,7 +598,15 @@ On the first authorization check for a user, the `EntityGetter`:
 | RoleBinding updated (subject changed) | Both old and new subjects' cache entries evicted |
 | PlatformRole or Role created/updated/deleted | **All** cache entries evicted (policy set also rebuilt) |
 
-Subject change detection uses the `PreviousObject` field on `ResourceEvent` (populated for `MODIFIED` events by the storage layer).
+Subject change detection uses the `PreviousObject` field on `ResourceEvent` (populated for `MODIFIED` events by the storage layer). If `PreviousObject` is unavailable (storage backend limitation), fallback to invalidating all cache entries on any RoleBinding update.
+
+### Cache TTL (Optional)
+
+An optional cache entry TTL can be configured via `--authz-entity-cache-ttl` (e.g., `5m`, default disabled or `0`). When enabled:
+- Cache entries expire after the TTL regardless of invalidation events
+- Expired entries are lazily evicted on access
+- Provides bounded staleness even if watch-based invalidation fails
+- Trade-off: increases database load for entity graph queries
 
 ---
 
@@ -417,22 +615,36 @@ Subject change detection uses the `PreviousObject` field on `ResourceEvent` (pop
 ### RoleBinding Validation
 
 1. **`subject`** is required (non-empty)
-2. **`roleRef.name`** is required; `roleRef.kind` must be `"PlatformRole"` or `"Role"`; `roleRef.apiGroup` must be `"gcp.managed.openshift.io"`
-3. **Referenced role existence**: the validator verifies that the referenced role exists in the database (PlatformRole or Role, depending on `roleRef.kind`). Uses injected `ValidatorDeps` functions to avoid circular imports between the `v1` types package and the authz/storage packages.
-4. **Cedar condition validation** (if `condition` is non-empty): wraps the condition in a Cedar policy template and parses via `cedar.Policy.UnmarshalCedar()`. Syntactically invalid conditions are rejected. References to `Namespace::` entities within conditions are rejected to prevent namespace traversal.
+2. **Subject normalization and canonicalization**:
+   - Apply the same email normalization as authentication middleware: NFC Unicode normalization, lowercase domain, preserve local-part case
+   - Store the canonicalized email in the RoleBinding
+   - Optionally reject subjects that are not already in canonical form (strict mode) or auto-canonicalize on write
+3. **`roleRef.name`** is required; `roleRef.kind` must be `"PlatformRole"` or `"Role"`; `roleRef.apiGroup` must be `"gcp.managed.openshift.io"`
+4. **Referenced role existence**: the validator verifies that the referenced role exists in the database (PlatformRole or Role, depending on `roleRef.kind`). Uses injected `ValidatorDeps` functions to avoid circular imports between the `v1` types package and the authz/storage packages.
+5. **Cedar condition validation** (if `condition` is non-empty):
+   - Wrap the condition in a Cedar policy template and parse via `cedar.Policy.UnmarshalCedar()`
+   - Syntactically invalid Cedar expressions are rejected with descriptive error message
+   - References to `Namespace::` entities are rejected to prevent namespace traversal
+   - Optional: enforce maximum condition length (e.g., 4096 characters) to prevent pathological policies
+   - Optional: validate that conditions are expressions only, not full Cedar policies (no `permit`/`forbid` keywords)
+   - Recommended but not enforced: warn if condition references `context.spec` without `!(context has spec)` guard when the role grants list permissions
 
-No self-grant prevention — a service-admin can grant any role (including `cluster-admin`) to themselves. This is intentional: it simplifies the bootstrap flow and trusts service-admins to manage their own namespace.
+No self-grant prevention — a `service-admin` can grant any role (including `cluster-admin`) to themselves or other users. This is intentional namespace-local privilege escalation: it simplifies the bootstrap flow and trusts `service-admin` role holders to manage their own namespace. Customers should grant `service-admin` only to namespace owners.
 
 ### Role Validation
 
 1. At least one permission is required
-2. All permissions must be in the valid permission set (20 permissions)
+2. All permissions must be in the valid permission set (20 permissions listed in the Granular Permissions section)
+3. Duplicate permissions are either rejected or deduplicated (implementation choice)
+4. Unknown permission names are rejected with a descriptive error listing valid permissions
 
-No infrastructure permission restriction — user-defined Roles may include any valid permission.
+No infrastructure permission restriction — user-defined Roles may include any valid permission. Note that Role changes trigger full policy set rebuild and cache invalidation across all API server replicas.
 
 ### PlatformRole Validation
 
 Same as Role validation. PlatformRoles are only created via the private API (Helm/kubectl), so the validator enforces the same schema constraints.
+
+**Operational note**: PlatformRole changes are operationally sensitive because they trigger full policy set rebuild and cache invalidation across all API server replicas. Changes should be deployed via Helm/ArgoCD with appropriate review and staging.
 
 ### Ownership Transfer
 
@@ -448,6 +660,8 @@ type ValidatorDeps struct {
     PlatformRoleExists func(ctx context.Context, name string) (bool, error)
 }
 ```
+
+**Consistency note**: Role existence validation is eventually consistent with the storage backend. If a referenced role is deleted after a RoleBinding is created but before the next policy reload, the binding's policy will fail to generate. The policy reload mechanism handles this gracefully by logging an error and retaining the last-known-good policy set. The next RoleBinding update or role recreation will trigger a successful reload.
 
 ---
 
@@ -485,10 +699,10 @@ spec:
     kind: Role
     name: us-east-cluster-viewer
     apiGroup: gcp.managed.openshift.io
-  condition: 'context.resourcePlural != "clusters" || context.spec.platform.gcp.region == "us-east1"'
+  condition: 'context.resourcePlural != "clusters" || (!(context has spec) || (context.spec has platform && context.spec.platform has gcp && context.spec.platform.gcp.region == "us-east1"))'
 ```
 
-The `context.resourcePlural` guard ensures the region condition is only evaluated when accessing clusters — not when accessing nodepools (where the `spec.platform.gcp.region` path may not exist).
+The `context.resourcePlural` guard ensures the region condition is only evaluated when accessing clusters. The nested guards (`!(context has spec)` and `has` checks) ensure safe evaluation during namespace-level authorization and handle missing attributes gracefully.
 
 ### Condition Validation
 
@@ -577,23 +791,104 @@ orlop/pkg/apiserver/
 
 ## Verification Checklist
 
-- [ ] Unauthenticated request → 401
-- [ ] Authenticated user with no bindings → 403
-- [ ] cluster-admin can CRUD clusters and nodepools within their namespace
+### Authentication & Trust Boundary
+- [ ] Missing `X-Endpoint-API-UserInfo` header → `401 Unauthorized`
+- [ ] Malformed base64 or JSON in header → `401 Unauthorized`
+- [ ] Empty or missing `email` claim → `401 Unauthorized`
+- [ ] `email_verified == false` → `401 Unauthorized` (when claim is present)
+- [ ] Direct request to app port cannot spoof `X-Endpoint-API-UserInfo` (deployment test)
+- [ ] ESPv2-proxied request produces trusted identity (integration test)
+- [ ] RoleBinding subject normalization matches request principal normalization exactly
+- [ ] Dev mode (`X-Dev-User`) works with authorization still active
+- [ ] Disabled auth mode (`--disable-auth`) skips both authn and authz
+
+### Basic Authorization
+- [ ] Authenticated user with no bindings → `403 Forbidden`
+- [ ] cluster-admin can create/list/get/update/delete clusters within their namespace
+- [ ] cluster-admin can create/list/get/update/delete nodepools within their namespace
 - [ ] cluster-admin cannot manage rolebindings or roles
-- [ ] cluster-viewer can list/get clusters and nodepools, cannot create/update/delete
-- [ ] service-admin can manage rolebindings and roles within their namespace
+- [ ] cluster-viewer can list/get clusters and nodepools
+- [ ] cluster-viewer cannot create/update/delete clusters or nodepools
+- [ ] service-admin can create/list/get/update/delete rolebindings within their namespace
+- [ ] service-admin can create/list/get/update/delete roles within their namespace
 - [ ] service-admin cannot create/update/delete clusters or nodepools
-- [ ] service-admin can bind cluster-admin to themselves (no self-grant prevention)
+- [ ] service-admin can bind cluster-admin to themselves (intentional self-grant)
+- [ ] service-admin binding cluster-admin to themselves grants cluster permissions
+- [ ] service-admin cannot affect other namespaces
+
+### Conditioned Authorization - Create
+- [ ] Conditioned `cluster.create` with allowed spec → succeeds
+- [ ] Conditioned `cluster.create` with disallowed spec → `403 Forbidden`
+- [ ] Missing `metadata.name` with conditioned create → fail closed `403`
+
+### Conditioned Authorization - Read
+- [ ] Conditioned `cluster.get` with allowed stored object → succeeds
+- [ ] Conditioned `cluster.get` with disallowed stored object → `403 Forbidden`
+- [ ] Conditioned `cluster.get` on non-existent object → `404 Not Found`
+
+### Conditioned Authorization - Update
+- [ ] Conditioned `cluster.update` (PUT) into allowed state → succeeds
+- [ ] Conditioned `cluster.update` (PUT) into disallowed state → `403 Forbidden`
+- [ ] Conditioned `cluster.update` (PATCH) with final state allowed → succeeds
+- [ ] Conditioned `cluster.update` (PATCH) with final state disallowed → `403 Forbidden`
+- [ ] PATCH evaluation uses post-patch object state, not patch fragment
+
+### Conditioned Authorization - Delete
+- [ ] Conditioned `cluster.delete` with allowed stored object → succeeds
+- [ ] Conditioned `cluster.delete` with disallowed stored object → `403 Forbidden`
+
+### Conditioned Authorization - List
+- [ ] Namespaced list: namespace-level authz allows query
+- [ ] Namespaced list: per-item filter removes disallowed objects
+- [ ] Namespaced list: allowed items appear, disallowed items filtered out
+- [ ] Cross-namespace list: namespace DB filter limits candidate namespaces
+- [ ] Cross-namespace list: per-item condition filter still applies
+- [ ] Cross-namespace list with no authorized namespaces → empty list (not `403`)
+
+### Multi-Resource Conditions
+- [ ] Role grants `cluster.get` + `nodepool.get`, condition targets clusters only
+- [ ] Accessing cluster applies region condition correctly
+- [ ] Accessing nodepool does not spuriously deny due to cluster condition
+- [ ] Condition without `context.resourcePlural` guard fails for unrelated resources
+
+### Cross-Namespace Operations
 - [ ] Cross-namespace list returns only resources from authorized namespaces
-- [ ] Cross-namespace list with no authorized namespaces returns empty list (not 403)
-- [ ] User-defined Role with Cedar condition on RoleBinding filters results correctly
-- [ ] User-defined Role with `context.resourcePlural` guard only filters the targeted resource type
-- [ ] PlatformRole mutations via public API → no endpoint (no `platformrole.*` permissions)
-- [ ] Cedar condition with invalid syntax → 400 at RoleBinding creation
+- [ ] User with bindings in namespace A and B sees resources from both
+- [ ] User with binding in namespace A sees only namespace A resources
+
+### Role & Binding Management
+- [ ] User-defined Role creation via public API succeeds
+- [ ] User-defined Role with valid permissions → accepted
+- [ ] User-defined Role with invalid permission → rejected with descriptive error
+- [ ] PlatformRole mutations via public API → no endpoint exists
+- [ ] RoleBinding referencing non-existent role → rejected at creation
+- [ ] RoleBinding with valid Cedar condition → accepted
+- [ ] Cedar condition with invalid syntax → `400 Bad Request` at RoleBinding creation
 - [ ] Cedar condition containing `Namespace::` → rejected at RoleBinding creation
-- [ ] RoleBinding referencing non-existent role → rejected
-- [ ] Hot-reload: creating a new RoleBinding takes effect without server restart
-- [ ] Hot-reload: deleting a Role invalidates policies and cache immediately
-- [ ] Per-binding policy isolation: unconditional binding does not satisfy conditioned policy for same role
+- [ ] RoleBinding subject is normalized and stored in canonical form
+
+### Hot-Reload & Multi-Replica
+- [ ] Creating a new RoleBinding takes effect without server restart
+- [ ] Deleting a RoleBinding removes access without server restart
+- [ ] Updating a Role rebuilds policies and invalidates cache
+- [ ] Deleting a Role invalidates policies and cache immediately
+- [ ] RoleBinding created through replica A is enforced by replica B (cross-replica consistency)
+- [ ] Role change invalidates all replicas (multi-replica cache invalidation)
+- [ ] Watch interruption recovers through retry/resync
+- [ ] Periodic resync (if enabled) catches missed watch events
+
+### Reload Failure Handling
+- [ ] Policy rebuild failure retains last-known-good policy set
+- [ ] Policy rebuild failure increments error metric
+- [ ] Initial startup with bad policy → server fails to start
+- [ ] Subsequent reload failure → retry on next watch event
+
+### Per-Binding Policy Isolation
+- [ ] User A: unconditional binding to `cluster-viewer`
+- [ ] User B: conditioned binding to `cluster-viewer` (same role, same namespace)
+- [ ] User A's unconditional binding does not satisfy User B's conditioned policy
+- [ ] User B's access is correctly filtered by condition
+
+### Health Probes
+- [ ] Health probes (`/healthz`, `/readyz`) bypass authn/authz
 - [ ] Health probes bypass authn/authz
