@@ -58,12 +58,15 @@ Classify the request by the smallest scope that can correctly deliver the featur
 
 ### Category 1: HyperShift Passthrough
 
-Use when HyperShift already supports the feature through `HostedCluster`, `NodePool`, or another HO-managed API, and Gecko only needs to expose the same capability.
+Use when HyperShift already supports the feature through `HostedCluster`, `NodePool`, or another HO-managed API, and Gecko only needs to expose and pass through the same capability.
 
 Typical scope:
 
 - `GECKO-API`
+- `GECKO-CONTROLLER`
 - `CLI`
+
+In this category, `GECKO-CONTROLLER` means adapter plumbing that copies the field from Gecko API resources into HO resources. It does not mean a new service workflow, asynchronous orchestration, external API lookup, durable state machine, or complex reconciliation.
 
 ### Category 2: Gecko Or CLI Transform
 
@@ -192,7 +195,7 @@ Set `SUPPORTED: TRUE` only when the complete customer-facing path already exists
 
 Set `SUPPORTED: FALSE` when any required layer is missing, when only partial support exists, or when support depends on unimplemented upstream/provider work.
 
-If HyperShift supports the low-level capability but Gecko/CLI do not expose it, report `SUPPORTED: FALSE` with scope `GECKO-API, CLI` or the minimal applicable set.
+If HyperShift supports the low-level capability but Gecko does not expose or pass it through, or the CLI does not expose it to users, report `SUPPORTED: FALSE` with scope `GECKO-API, GECKO-CONTROLLER, CLI` or the minimal applicable set.
 
 If HyperShift supports the feature for another platform but not GCP, report `SUPPORTED: FALSE` and include `HO` or `HO-DEPENDENCY` if GCP platform support needs implementation.
 
@@ -221,7 +224,7 @@ When multiple scopes are needed, list them comma-separated in dependency order, 
 
 Use this rubric:
 
-- `S`: Straightforward passthrough in one or two layers; no new controller logic; no new dependency; tests are local and obvious.
+- `S`: Straightforward passthrough across API, adapter plumbing, or CLI; no new complex controller logic; no new dependency; tests are local and obvious.
 - `M`: Multiple layers need updates, or a simple transform/validation/generation path is required; no new long-running controller/service workflow; no upstream dependency work.
 - `L`: New HO behavior, new Gecko controller/service logic, multi-resource orchestration, upgrade/rollout semantics, significant validation, or complex tests are required.
 - `XL`: Any upstream/downstream dependency implementation and release chain, or broad cross-repo work spanning dependency, HO, Gecko controller, API, CLI, and e2e validation.
@@ -281,13 +284,14 @@ Example output shape:
 
 ```text
 SUPPORTED: FALSE
-SCOPE: CLI
+SCOPE: GECKO-CONTROLLER, CLI
 LEVEL OF EFFORT: S
-SUMMARY: HyperShift and Gecko expose GCP node pool resource labels, but the CLI does not provide a flag or payload wiring for customers to set them. The remaining work is a passthrough CLI addition with unit coverage.
+SUMMARY: HyperShift and Gecko expose GCP node pool resource labels, but the assessment did not find adapter plumbing or CLI payload wiring for customers to set them. The remaining work is passthrough wiring from Gecko to HO plus a CLI flag and unit coverage.
 EVIDENCE:
-- hypershift/api/hypershift/v1beta1/nodepool_types.go:123 - GCP node pool platform spec includes resource labels.
+- hypershift/api/hypershift/v1beta1/gcp.go:467 - GCP node pool platform spec includes resource labels.
 - gecko/platform-api/api/private/v1/nodepool_types.go:79 - Gecko node pool GCP platform spec includes resource labels.
-- gcp-hcp-ctl/pkg/nodepool/create.go:88 - Node pool create flags include machine type, disk, zone, and subnet options, but no resource labels flag.
+- gecko/controllers/nodepool/manifest/manifests.go:105 - Node pool manifest builder copies existing GCP platform fields, but not resource labels.
+- gcp-hcp-ctl/pkg/nodepool/create.go:48 - Node pool create flags include machine type, disk, zone, and version options, but no resource labels flag.
 ```
 
 This example is illustrative. Always inspect current code before returning an assessment.
