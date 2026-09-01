@@ -5,18 +5,22 @@ description: Assess GCP HCP feature support across HyperShift, Gecko, gcp-hcp-ct
 
 # HCP Feature Support Assessment
 
-Use this skill to assess whether a requested GCP HCP feature is already supported, what implementation scope remains, and the level of effort. The assessment must be based on inspecting the local repositories, not on assumptions.
+Use this skill to assess whether a requested GCP HCP feature is already supported, what implementation scope remains, and the level of effort. The assessment must be based on repository evidence, not on assumptions.
 
 ## Repositories
 
-Inspect these repositories as applicable:
+Inspect these repositories as applicable. Prefer an available local clone for fast search and accurate line numbers. If a local clone is unavailable, use the GitHub URL to browse or fetch the relevant files.
 
-- `/Users/asegundo/git-gcp/hypershift`: HyperShift and HyperShift Operator (HO), including `HostedCluster`, `HostedControlPlane`, `NodePool`, controllers, feature gates, validation, CRDs, docs, and dependency versions.
-- `/Users/asegundo/git-gcp/gecko`: Gecko platform API and controllers, including customer-facing API types, generated public API, adapters, placement, version resolution, and reconciliation into HO resources.
-- `/Users/asegundo/git-gcp/gcp-hcp-ctl`: `gcphcpctl` CLI, including flags, payload construction, API clients, command behavior, and tests.
-- `/Users/asegundo/git-gcp/gcp-hcp`: GCP HCP design decisions, implementation plans, studies, docs, and project context.
-- `/Users/asegundo/git-gcp/cluster-api-provider-gcp`: CAPG/provider support when the feature depends on GCP infrastructure or CAPI provider behavior.
-- Other local dependency repositories under `/Users/asegundo/git-gcp/` only when the feature clearly depends on them.
+| Repository | GitHub URL | Local Hint |
+|------------|------------|------------|
+| HyperShift and HyperShift Operator (HO) | `https://github.com/openshift/hypershift` | `../hypershift` |
+| Gecko platform API and controllers | `https://github.com/openshift-online/gecko` | `../gecko` |
+| `gcphcpctl` CLI | `https://github.com/openshift-online/gcp-hcp-ctl` | `../gcp-hcp-ctl` |
+| GCP HCP design docs, plans, and project context | `https://github.com/openshift-online/gcp-hcp` | current repository |
+
+Resolve local hints relative to the parent directory of the current repository. Do not hardcode user-specific absolute paths in the assessment or evidence.
+
+Discover additional HO dependencies dynamically from HyperShift code, `go.mod`, and imports. CAPG is one possible dependency, not a fixed or exhaustive dependency list.
 
 ## Assessment Rules
 
@@ -66,7 +70,7 @@ Before adding `HO`, verify that existing HyperShift fields and controllers canno
 
 ### Category 5: HyperShift Dependency Implementation
 
-Use when the work requires implementation in an HO dependency before HO can support it. Examples include CAPG, CAPI, cloud provider operators, installer/image payload dependencies, or downstream forks that must be synced and released before HyperShift can consume them.
+Use when the work requires implementation in an HO dependency before HO can support it. Examples include CAPI providers, CAPI, cloud provider operators, installer/image payload dependencies, or downstream forks that must be synced and released before HyperShift can consume them.
 
 Typical scope:
 
@@ -74,7 +78,20 @@ Typical scope:
 - `HO`
 - Plus `GECKO-API`, `GECKO-CONTROLLER`, or `CLI` depending on the exposure path.
 
-For CAPG or CAPI work, include upstream implementation, downstream/fork sync, dependency bump, HO integration, and Gecko/CLI exposure in the summary.
+For dependency work, include upstream implementation, downstream/fork sync if applicable, dependency bump, HO integration, and Gecko/CLI exposure in the summary.
+
+## Discovering HO Dependencies
+
+When the feature appears to require provider, CAPI, cloud operator, or external component behavior that HyperShift itself does not implement:
+
+1. Identify the infrastructure or platform layer the feature touches: compute, networking, storage, identity, ingress, DNS, machine lifecycle, release payload, credentials, observability, or another area.
+2. Search HyperShift's `go.mod` for modules that provide relevant APIs or controllers.
+3. Search HyperShift API and controller code for imports, type references, annotations, CRD fields, and comments related to the dependency.
+4. Determine the dependency's upstream repository from the Go module path, import path, existing documentation, or generated code headers.
+5. Check whether a local sibling clone exists using the repository name derived from the module or GitHub URL.
+6. If a local clone exists, inspect it for the needed type, CRD field, controller behavior, tests, and release status.
+7. If no local clone exists, use the GitHub URL to inspect relevant API types, CRDs, controller code, issues, or documentation when available.
+8. Report the dependency module path or repository URL, what is missing or already present, and whether the work is upstream, downstream-only, a dependency bump, or already available but not consumed by HO.
 
 ## Required Investigation Workflow
 
@@ -86,7 +103,7 @@ Follow this order unless the request makes another order obviously better:
 4. Search Gecko controllers for adapters or reconcilers that map Gecko API state to HyperShift `HostedCluster`, `NodePool`, or related resources.
 5. Search `gcp-hcp-ctl` for command flags, request payload construction, API client models, documentation, and tests.
 6. Search GCP HCP design docs and implementation plans for known decisions, constraints, or intended behavior.
-7. Search dependency repositories only when HyperShift support appears blocked by provider, CAPI, or external operator functionality.
+7. Discover and inspect dependency repositories only when HyperShift support appears blocked by provider, CAPI, cloud operator, or external component functionality.
 8. Identify the minimum complete scope and level of effort.
 9. Report concise evidence with file paths and line numbers where possible.
 
@@ -130,7 +147,7 @@ Useful GCP HCP context locations:
 
 Dependency indicators:
 
-- Missing provider-side field or behavior in CAPG/CAPI.
+- Missing provider-side field or behavior in a CAPI provider, CAPI, cloud operator, or other HO dependency.
 - HyperShift code cannot express the behavior without dependency API changes.
 - HyperShift `go.mod` pins a dependency version that lacks the needed type or behavior.
 - Existing TODOs, issues, or comments explicitly state dependency work is required.
@@ -154,7 +171,7 @@ Use only these scope values:
 - `GECKO-API`: Gecko customer-facing API types, generated public API, validation, OpenAPI/CRDs, or API tests.
 - `GECKO-CONTROLLER`: Gecko reconciliation, adapters, orchestration, async state, status, retries, service integrations, or writes to HO resources.
 - `HO`: HyperShift API, validation, controllers, CPO/HO rendering, feature gates, tests, docs, or release payload integration.
-- `HO-DEPENDENCY`: CAPG/CAPI/provider/operator/upstream or downstream dependency changes plus dependency bump/release work.
+- `HO-DEPENDENCY`: CAPI provider, CAPI, cloud operator, upstream, downstream dependency, or release payload changes plus dependency bump/release work.
 
 When multiple scopes are needed, list them comma-separated in dependency order, for example:
 
@@ -181,8 +198,8 @@ SCOPE: NONE|CLI|GECKO-API|GECKO-CONTROLLER|HO|HO-DEPENDENCY[, ...]
 LEVEL OF EFFORT: S|M|L|XL
 SUMMARY: One or two sentences explaining current support and what is needed.
 EVIDENCE:
-- /absolute/path/or/repo-relative/path:line - concise finding
-- /absolute/path/or/repo-relative/path:line - concise finding
+- repo-relative/path:line - concise finding
+- repo-relative/path:line - concise finding
 ```
 
 Keep the answer objective. Do not include a long implementation plan unless the user explicitly asks for one.
