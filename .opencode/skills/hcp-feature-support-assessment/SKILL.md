@@ -22,6 +22,36 @@ Resolve local hints relative to the parent directory of the current repository. 
 
 Discover additional HO dependencies dynamically from HyperShift code, `go.mod`, and imports. CAPG is one possible dependency, not a fixed or exhaustive dependency list.
 
+For reliable assessments, local clones of HyperShift, Gecko, and `gcp-hcp-ctl` are expected. Some repositories may be private or require GitHub authentication, so public web fetching may not work. If a required repository cannot be inspected locally or remotely, report the assessment as partial in `SUMMARY` and cite the missing repository in `EVIDENCE`.
+
+## Repository Access Workflow
+
+Before assessing supportability:
+
+1. Determine the current repository root and its parent directory.
+2. Check each local hint under the parent directory.
+3. If a local clone exists, use that clone for `Glob`, `Grep`, and `Read` calls.
+4. If a local clone is missing, try the GitHub URL only for public or authenticated access.
+5. If neither local nor remote inspection is available, do not infer support. Mark the finding as unverified and explain which scope could not be inspected.
+
+When using opencode tools from the `gcp-hcp` repository, remember that `Glob` and `Grep` default to the current repository. Pass the target repository path explicitly when searching sibling clones.
+
+For broad cross-repo exploration, use the `Task` tool with `subagent_type="explore"` and point each task at one repository. Ask each subagent to return only evidence relevant to the requested feature, including file paths, line numbers, positive findings, and missing areas searched.
+
+Run cross-repo searches in parallel when possible:
+
+- One search for HyperShift support.
+- One search for Gecko API/controller exposure.
+- One search for `gcp-hcp-ctl` CLI exposure.
+- One search for GCP HCP design context.
+- Additional searches for dependencies only after HyperShift evidence identifies them.
+
+## Branch And Version Scope
+
+Assess the default branch of each repository unless the user specifies a release, branch, commit, or product version. If the user specifies a version, inspect that branch or tag when available and state the inspected revision in `SUMMARY` or `EVIDENCE`.
+
+Do not report `SUPPORTED: TRUE` solely because code exists on a branch that is not the requested branch or release line. If support exists only on a newer branch, report `SUPPORTED: FALSE` or partial support and explain the backport/release gap.
+
 ## Assessment Rules
 
 Classify the request by the smallest scope that can correctly deliver the feature.
@@ -46,6 +76,8 @@ Typical scope:
 - `CLI`
 
 If the transformation is purely client-side and does not need durable status, retries, credentials, or reconciliation, do not include `GECKO-CONTROLLER`.
+
+Include `GECKO-CONTROLLER` when the transformation requires external API calls, credentials, retries, cached state, status reporting, asynchronous completion, cross-resource coordination, or durable reconciliation.
 
 ### Category 3: Gecko Controller Or Service Logic
 
@@ -98,14 +130,16 @@ When the feature appears to require provider, CAPI, cloud operator, or external 
 Follow this order unless the request makes another order obviously better:
 
 1. Restate the feature request in concrete terms: customer input, desired behavior, and likely affected resources.
-2. Search HyperShift first for API fields, CRD schema, controller logic, validation, feature gates, docs, and tests related to the feature.
-3. Search Gecko platform API for customer-facing types and generated public API fields.
-4. Search Gecko controllers for adapters or reconcilers that map Gecko API state to HyperShift `HostedCluster`, `NodePool`, or related resources.
-5. Search `gcp-hcp-ctl` for command flags, request payload construction, API client models, documentation, and tests.
-6. Search GCP HCP design docs and implementation plans for known decisions, constraints, or intended behavior.
-7. Discover and inspect dependency repositories only when HyperShift support appears blocked by provider, CAPI, cloud operator, or external component functionality.
-8. Identify the minimum complete scope and level of effort.
-9. Report concise evidence with file paths and line numbers where possible.
+2. Identify the requested branch, release, or product version. If none is specified, use the default branch and say so only when relevant.
+3. Search HyperShift first for API fields, CRD schema, controller logic, validation, feature gates, docs, and tests related to the feature.
+4. Verify that the support applies to GCP specifically, not only to AWS, Azure, IBM Cloud, KubeVirt, Agent, or another platform.
+5. Search Gecko platform API for customer-facing types and generated public API fields.
+6. Search Gecko controllers for adapters or reconcilers that map Gecko API state to HyperShift `HostedCluster`, `NodePool`, or related resources.
+7. Search `gcp-hcp-ctl` for command flags, request payload construction, API client models, documentation, and tests.
+8. Search GCP HCP design docs and implementation plans for known decisions, constraints, or intended behavior.
+9. Discover and inspect dependency repositories only when HyperShift support appears blocked by provider, CAPI, cloud operator, or external component functionality.
+10. Identify the minimum complete scope and level of effort.
+11. Report concise evidence with file paths and line numbers where possible.
 
 Do not implement code while using this skill unless the user explicitly asks for implementation. The primary output is an assessment.
 
@@ -160,6 +194,12 @@ Set `SUPPORTED: FALSE` when any required layer is missing, when only partial sup
 
 If HyperShift supports the low-level capability but Gecko/CLI do not expose it, report `SUPPORTED: FALSE` with scope `GECKO-API, CLI` or the minimal applicable set.
 
+If HyperShift supports the feature for another platform but not GCP, report `SUPPORTED: FALSE` and include `HO` or `HO-DEPENDENCY` if GCP platform support needs implementation.
+
+If one layer supports the feature but another required layer does not, report `SUPPORTED: FALSE` and list only the missing implementation scopes. Mention the existing support in `SUMMARY` or `EVIDENCE`.
+
+If a required repository could not be inspected, avoid a definitive positive assessment. Use `SUPPORTED: FALSE` when required evidence is missing, or state that the result is partial if the user asked for best-effort triage.
+
 If the request is ambiguous, make the narrowest reasonable interpretation and include the assumption in `SUMMARY`. Ask a short clarification question only when the ambiguity changes the scope materially.
 
 ## Scope Values
@@ -204,6 +244,8 @@ EVIDENCE:
 
 Keep the answer objective. Do not include a long implementation plan unless the user explicitly asks for one.
 
+If the assessment is partial because a repository, branch, or dependency could not be inspected, say so in `SUMMARY` and include an `EVIDENCE` bullet for the missing source.
+
 ## Evidence Quality
 
 Evidence should include positive and negative findings. Prefer file paths with line numbers from code reads or grep results.
@@ -220,3 +262,32 @@ Avoid vague evidence:
 - `Probably supported by HyperShift.`
 
 If no direct code evidence exists, cite the most relevant searched files and state the absence precisely.
+
+## Worked Example
+
+Example request:
+
+`Assess support for setting GCP resource labels on node pools.`
+
+Expected investigation:
+
+1. Search HyperShift `NodePool` GCP platform API and controller code for resource label support.
+2. Verify the field is under GCP-specific node pool platform configuration, not only another provider.
+3. Search Gecko private and public `NodePool` API types for the same customer-facing field.
+4. Search Gecko controllers or adapters to confirm the field is copied into HyperShift `NodePool` specs.
+5. Search `gcp-hcp-ctl` nodepool create/update commands for flags and request payload fields.
+
+Example output shape:
+
+```text
+SUPPORTED: FALSE
+SCOPE: CLI
+LEVEL OF EFFORT: S
+SUMMARY: HyperShift and Gecko expose GCP node pool resource labels, but the CLI does not provide a flag or payload wiring for customers to set them. The remaining work is a passthrough CLI addition with unit coverage.
+EVIDENCE:
+- hypershift/api/hypershift/v1beta1/nodepool_types.go:123 - GCP node pool platform spec includes resource labels.
+- gecko/platform-api/api/private/v1/nodepool_types.go:79 - Gecko node pool GCP platform spec includes resource labels.
+- gcp-hcp-ctl/pkg/nodepool/create.go:88 - Node pool create flags include machine type, disk, zone, and subnet options, but no resource labels flag.
+```
+
+This example is illustrative. Always inspect current code before returning an assessment.
