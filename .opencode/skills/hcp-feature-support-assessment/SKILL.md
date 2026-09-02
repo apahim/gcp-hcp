@@ -1,6 +1,6 @@
 ---
 name: hcp-feature-support-assessment
-description: Assess GCP HCP feature support across HyperShift, Gecko, gcp-hcp-ctl, and HO dependencies; use when asked for supportability, implementation scope, or level of effort for a feature request.
+description: Assess GCP HCP feature support across HyperShift, Gecko, gcp-hcp-ctl, gcp-hcp-infra, HO dependencies, and external dependencies; use when asked for supportability, implementation scope, or level of effort for a feature request.
 ---
 
 # HCP Feature Support Assessment
@@ -16,13 +16,18 @@ Inspect these repositories as applicable. Prefer an available local clone for fa
 | HyperShift and HyperShift Operator (HO) | `https://github.com/openshift/hypershift` | `../hypershift` |
 | Gecko platform API and controllers | `https://github.com/openshift-online/gecko` | `../gecko` |
 | `gcphcpctl` CLI | `https://github.com/openshift-online/gcp-hcp-ctl` | `../gcp-hcp-ctl` |
+| GCP HCP infrastructure and platform automation | `https://github.com/openshift-online/gcp-hcp-infra` | `../gcp-hcp-infra` |
 | GCP HCP design docs, plans, and project context | `https://github.com/openshift-online/gcp-hcp` | current repository |
 
 Resolve local hints relative to the parent directory of the current repository. Do not hardcode user-specific absolute paths in the assessment or evidence.
 
+Use `gcp-hcp-infra` when the feature depends on Terraform, ArgoCD, Helm charts, pipelines, GKE, GAR, IAM, networking, Secret Manager, image distribution, bootstrap, registration, or environment configuration.
+
 Discover additional HO dependencies dynamically from HyperShift code, `go.mod`, and imports. CAPG is one possible dependency, not a fixed or exhaustive dependency list.
 
-For reliable assessments, local clones of HyperShift, Gecko, and `gcp-hcp-ctl` are expected. Some repositories may be private or require GitHub authentication, so public web fetching may not work. If a required repository cannot be inspected locally or remotely, report the assessment as partial in `SUMMARY` and cite the missing repository in `EVIDENCE`.
+Discover external dependencies dynamically from repository evidence. External dependencies include hosted services, registries, release pipelines, operator catalogs, GCP product behavior, org policy, or manual operational readiness gates that are not implemented in the inspected code repositories.
+
+For reliable assessments, local clones of HyperShift, Gecko, `gcp-hcp-ctl`, and `gcp-hcp-infra` are expected. Some repositories may be private or require GitHub authentication, so public web fetching may not work. If a required repository cannot be inspected locally or remotely, report the assessment as partial in `SUMMARY` and cite the missing repository in `EVIDENCE`.
 
 ## Repository Access Workflow
 
@@ -47,8 +52,10 @@ Run cross-repo searches in parallel when possible:
 - One search for HyperShift support.
 - One search for Gecko API/controller exposure.
 - One search for `gcp-hcp-ctl` CLI exposure.
+- One search for GCP HCP infrastructure and platform automation.
 - One search for GCP HCP design context.
 - Additional searches for dependencies only after HyperShift evidence identifies them.
+- Additional searches for external dependencies only after repository evidence identifies them.
 
 ## Branch And Version Scope
 
@@ -119,6 +126,28 @@ Typical scope:
 
 For dependency work, include upstream implementation, downstream/fork sync if applicable, dependency bump, HO integration, and Gecko/CLI exposure in the summary.
 
+### Category 6: GCP HCP Infrastructure Or Platform Automation
+
+Use when the feature requires GCP HCP-owned infrastructure, deployment automation, operational automation, or environment configuration before product layers can consume it. Examples include Terraform modules/configs, ArgoCD applications, Helm charts, Tekton/Konflux pipelines, GAR repositories, pull-through caches, image mirroring or pre-warming workflows, GKE configuration, IAM, Secret Manager, Cloud NAT/no-NAT topology, bootstrap content, management/region/global cluster setup, validation infrastructure, or environment rollout.
+
+Typical scope:
+
+- `GCP-HCP-INFRA`
+- Plus `HO`, `GECKO-API`, `GECKO-CONTROLLER`, `CLI`, `HO-DEPENDENCY`, or `EXTERNAL-DEPENDENCIES` depending on the customer-facing path and prerequisites.
+
+Do not treat an infrastructure resource as proof that the feature is ready. For example, a GAR repository or lazy pull-through cache does not prove required images are available beforehand unless repository evidence shows publication, mirroring, pre-warming, or validation for the required image set.
+
+### Category 7: External Dependency Or Service Readiness
+
+Use when support depends on systems or readiness gates outside the inspected GCP HCP, Gecko, `gcp-hcp-ctl`, HyperShift, and HO dependency repositories. Examples include Red Hat release services, Cincinnati data availability, Konflux behavior, Quay or `registry.redhat.io` availability, OCP release payload contents, operator catalogs, GCP product behavior or limits, org policy, manual approval/readiness processes, or registry/image availability not represented as code in the inspected repositories.
+
+Typical scope:
+
+- `EXTERNAL-DEPENDENCIES`
+- Plus `GCP-HCP-INFRA`, `HO`, `GECKO-API`, `GECKO-CONTROLLER`, or `CLI` depending on where the platform must integrate the external readiness.
+
+Use `HO-DEPENDENCY` for code dependencies HyperShift imports, vendors, releases, or bumps. Use `EXTERNAL-DEPENDENCIES` for hosted services, registries, release pipelines, catalogs, cloud-service behavior, org policies, or manual readiness gates.
+
 ## Discovering HO Dependencies
 
 When the feature appears to require provider, CAPI, cloud operator, or external component behavior that HyperShift itself does not implement:
@@ -132,6 +161,16 @@ When the feature appears to require provider, CAPI, cloud operator, or external 
 7. If no local clone exists, use the GitHub URL to inspect relevant API types, CRDs, controller code, issues, or documentation when available.
 8. Report the dependency module path or repository URL, what is missing or already present, and whether the work is upstream, downstream-only, a dependency bump, or already available but not consumed by HO.
 
+## Discovering External Dependencies
+
+When the feature appears to require service readiness, registry content, release metadata, cloud-provider behavior, org policy, or a manual process outside the inspected repositories:
+
+1. Identify the external system from repository evidence such as URLs, registry pullspecs, service clients, design decisions, runbooks, Terraform variables, comments, or operational docs.
+2. Search the owning repository for configuration, automation, validation, and documented assumptions around that system.
+3. Determine whether readiness can be verified from repository evidence. If it cannot, do not infer readiness.
+4. For image-availability features, distinguish registry configuration from image content availability. Evidence of a GAR repository, remote repository, pull-through cache, or admission rewrite is not sufficient unless there is also evidence that the required image set is published, mirrored, pre-warmed, or validated before customer use.
+5. Report what external dependency exists, what evidence confirms or fails to confirm readiness, and whether platform work is needed to automate or validate it.
+
 ## Required Investigation Workflow
 
 Follow this order unless the request makes another order obviously better:
@@ -143,10 +182,12 @@ Follow this order unless the request makes another order obviously better:
 5. Search Gecko platform API for customer-facing types and generated public API fields.
 6. Search Gecko controllers for adapters or reconcilers that map Gecko API state to HyperShift `HostedCluster`, `NodePool`, or related resources.
 7. Search `gcp-hcp-ctl` for command flags, request payload construction, API client models, documentation, and tests.
-8. Search GCP HCP design docs and implementation plans for known decisions, constraints, or intended behavior.
-9. Discover and inspect dependency repositories only when HyperShift support appears blocked by provider, CAPI, cloud operator, or external component functionality.
-10. Identify the minimum complete scope and level of effort.
-11. Report concise evidence with file paths and line numbers where possible.
+8. Search `gcp-hcp-infra` for Terraform, ArgoCD, Helm, pipeline, GAR, GKE, IAM, networking, Secret Manager, bootstrap, registration, deployment, and validation support when the feature touches platform infrastructure or operations.
+9. Search GCP HCP design docs and implementation plans for known decisions, constraints, or intended behavior.
+10. Discover and inspect dependency repositories only when HyperShift support appears blocked by provider, CAPI, cloud operator, or external component functionality.
+11. Discover and assess external dependencies when repository evidence shows that support depends on hosted services, registries, release metadata, operator catalogs, GCP product behavior, org policy, or manual readiness gates.
+12. Identify the minimum complete scope and level of effort.
+13. Report concise evidence with file paths and line numbers where possible.
 
 Do not implement code while using this skill unless the user explicitly asks for implementation. The primary output is an assessment.
 
@@ -179,6 +220,20 @@ Useful CLI locations and patterns:
 - `cmd/**/*.go`
 - Search terms: feature name, flag name, JSON field name, request type, `cobra`, `Create`, `Update`, `Scale`, `version`, `channel`.
 
+Useful GCP HCP infrastructure locations and patterns:
+
+- `terraform/modules/**/*.tf`
+- `terraform/config/**/*.tf`
+- `argocd/config/**/*.yaml`
+- `argocd/rendered/**/*.yaml`
+- `helm/charts/**/*.yaml`
+- `helm/charts/**/*.md`
+- `pipelines/**/*.yaml`
+- `.tekton/**/*.yaml`
+- `docs/**/*.md`
+- `secrets/**/*.yaml`
+- Search terms: feature name, `artifactregistry`, `google_artifact_registry`, `REMOTE_REPOSITORY`, `remote_repository_config`, `pkg.dev`, `GAR`, `mirror`, `pull-through`, `cache`, `oc mirror`, `oc-mirror`, `ImageSetConfiguration`, `ImageDigestMirrorSet`, `ImageTagMirrorSet`, `registry.redhat.io`, `quay.io`, `Cloud NAT`, `Private Google Access`, `external IP`, `Secret Manager`, `Workload Identity`, `Konflux`, `Tekton`, `bootstrap`.
+
 Useful GCP HCP context locations:
 
 - `design-decisions/**/*.md`
@@ -193,17 +248,28 @@ Dependency indicators:
 - HyperShift `go.mod` pins a dependency version that lacks the needed type or behavior.
 - Existing TODOs, issues, or comments explicitly state dependency work is required.
 
+External dependency indicators:
+
+- Required image content, operator catalogs, release payloads, release metadata, or registry credentials are not produced by inspected code.
+- Repository evidence points to a hosted service such as Cincinnati, Konflux, Quay, `registry.redhat.io`, GAR remote repositories, GCP APIs, org policy, or manual operations.
+- A configuration exists but content availability or service readiness must happen beforehand and is not automated or validated in the inspected repositories.
+- The feature depends on GCP product behavior, limits, preview status, IAM propagation, policy exceptions, or organization-level configuration.
+
 ## Support Determination
 
-Set `SUPPORTED: TRUE` only when the complete customer-facing path already exists and appears usable without implementation in all required layers. This means HyperShift support alone is not enough if Gecko API or CLI exposure is required by the requested product surface.
+Set `SUPPORTED: TRUE` only when the complete customer-facing path already exists and appears usable without implementation in all required layers. This includes required GCP HCP infrastructure automation and external dependency readiness, not just HyperShift, Gecko, or CLI support.
 
-Set `SUPPORTED: FALSE` when inspected evidence shows any required layer is missing, when only partial feature support exists, or when support depends on unimplemented upstream/provider work.
+Set `SUPPORTED: FALSE` when inspected evidence shows any required layer is missing, when only partial feature support exists, when required GCP HCP infrastructure automation is missing, or when support depends on unimplemented upstream/provider/external work.
 
 If HyperShift supports the low-level capability but Gecko does not expose or pass it through, or the CLI does not expose it to users, report `SUPPORTED: FALSE` with scope `GECKO-API, GECKO-CONTROLLER, CLI` or the minimal applicable set.
 
 If HyperShift supports the feature for another platform but not GCP, report `SUPPORTED: FALSE` and include `HO` or `HO-DEPENDENCY` if GCP platform support needs implementation.
 
 If one layer supports the feature but another required layer does not, report `SUPPORTED: FALSE` and list only the missing implementation scopes. Mention the existing support in `SUMMARY` or `EVIDENCE`.
+
+If infrastructure exists but the operational workflow, publication pipeline, environment rollout, validation, IAM, or content availability required by the feature is missing, report `SUPPORTED: FALSE` with `GCP-HCP-INFRA`.
+
+If support depends on external service readiness or content availability that is not verifiable from inspected repository evidence, include `EXTERNAL-DEPENDENCIES` and lower confidence unless there is clear positive evidence.
 
 If a required repository, branch, or dependency could not be inspected, avoid a definitive positive assessment. Use `SUPPORTED: FALSE` only when inspected evidence shows a required layer is missing. Otherwise, report the assessment as partial in `SUMMARY`, set `CONFIDENCE: LOW`, and cite the missing source in `EVIDENCE`.
 
@@ -219,10 +285,12 @@ Use only these scope values:
 - `GECKO-CONTROLLER`: Gecko reconciliation, adapters, orchestration, async state, status, retries, service integrations, or writes to HO resources.
 - `HO`: HyperShift API, validation, controllers, CPO/HO rendering, feature gates, tests, docs, or release payload integration.
 - `HO-DEPENDENCY`: CAPI provider, CAPI, cloud operator, upstream, downstream dependency, or release payload changes plus dependency bump/release work.
+- `GCP-HCP-INFRA`: Terraform, ArgoCD, Helm charts, pipelines, GAR/GKE/IAM/networking/Secret Manager, bootstrap, registration, platform environment setup, validation infrastructure, image distribution, or operational automation in `gcp-hcp-infra`.
+- `EXTERNAL-DEPENDENCIES`: Red Hat, GCP, or third-party hosted services; release services; registries; image/catalog availability; org policies; manual approval/readiness gates; or external process dependencies not represented as code in the inspected repositories.
 
 When multiple scopes are needed, list them comma-separated in dependency order, for example:
 
-`SCOPE: HO-DEPENDENCY, HO, GECKO-API, GECKO-CONTROLLER, CLI`
+`SCOPE: EXTERNAL-DEPENDENCIES, HO-DEPENDENCY, HO, GCP-HCP-INFRA, GECKO-API, GECKO-CONTROLLER, CLI`
 
 ## Level Of Effort
 
@@ -232,9 +300,9 @@ Use this rubric:
 
 - `NONE`: No implementation is needed because the complete customer-facing path is already supported and usable.
 - `S`: Mechanical passthrough, CLI flag, simple API exposure, adapter field copy, docs, or local tests. Can span multiple layers if no new behavior, transform, reconciliation, dependency bump, or complex validation is required.
-- `M`: Multiple-layer implementation with generated API/client updates, moderate validation, simple transformation, version/channel normalization, or non-trivial but local tests. No new durable controller workflow or upstream dependency work.
-- `L`: New HyperShift behavior, new Gecko reconciliation/service logic, lifecycle semantics, rollout/upgrade/replacement behavior, status handling, retries, external API interaction, or significant integration/e2e test work.
-- `XL`: Upstream/downstream dependency implementation, dependency release or bump chain, provider/CAPI/cloud-operator changes, release payload coordination, or broad cross-repo work blocked on dependency availability.
+- `M`: Multiple-layer implementation with generated API/client updates, moderate validation, simple transformation, version/channel normalization, moderate Terraform/Helm/API/configuration changes, or non-trivial but local tests. No new durable controller workflow, upstream dependency work, or external readiness dependency.
+- `L`: New HyperShift behavior, new Gecko reconciliation/service logic, lifecycle semantics, rollout/upgrade/replacement behavior, status handling, retries, external API interaction, new GCP HCP infrastructure automation, image mirroring/pre-warming workflow, IAM/network rollout, validation environments, or significant integration/e2e test work.
+- `XL`: Upstream/downstream dependency implementation, dependency release or bump chain, provider/CAPI/cloud-operator changes, release payload coordination, external release-chain or service changes, broad image supply-chain readiness across OCP payload/operator catalogs, or broad cross-repo work blocked on dependency or external availability.
 
 Examples:
 
@@ -243,15 +311,17 @@ Examples:
 - `S`: Add Gecko API, controller passthrough, and CLI exposure for an existing HyperShift GCP field.
 - `M`: Add Gecko API, generated clients, validation, CLI payload support, and a simple transform before writing HyperShift resources.
 - `L`: Add Gecko reconciliation that calls an external API, persists status, retries, and coordinates cluster or node pool lifecycle.
+- `L`: Add GCP HCP infrastructure automation to mirror or pre-warm required images, configure GAR/IAM/networking, and validate zero-egress image pulls.
 - `XL`: Add missing CAPG/provider support, release it, bump HyperShift, implement HO integration, then expose it through Gecko and CLI.
+- `XL`: Coordinate external release-service, registry, or operator-catalog changes before GCP HCP can automate consumption.
 
 ## Risk
 
 Use this rubric:
 
 - `LOW`: Mechanical field passthrough, local validation, CLI/docs updates, no customer-visible lifecycle behavior change, no dependency or release-chain uncertainty.
-- `MEDIUM`: Public API compatibility concerns, generated clients, moderate validation, uncertain rollout behavior, multiple repos needing coordinated changes, or integration/e2e coverage needed.
-- `HIGH`: Upgrade or replacement semantics, long-running orchestration, credentials or external service calls, dependency release chain, production migration, provider limitations, or incomplete evidence for a critical required layer.
+- `MEDIUM`: Public API compatibility concerns, generated clients, moderate validation, uncertain rollout behavior, coordinated Terraform/ArgoCD/Helm changes, multiple repos needing coordinated changes, or integration/e2e coverage needed.
+- `HIGH`: Upgrade or replacement semantics, long-running orchestration, credentials or external service calls, dependency release chain, production migration, provider limitations, image supply-chain availability, customer-project pull authentication, zero-egress validation, registry/service availability, org policy constraints, external/manual readiness gates, or incomplete evidence for a critical required layer.
 
 ## Confidence
 
@@ -259,7 +329,7 @@ Use this rubric:
 
 - `HIGH`: All required repositories and relevant branches were inspected locally or remotely, and evidence covers positive and negative findings.
 - `MEDIUM`: Most required layers were inspected, but some evidence is indirect, generated, stale, or missing line-level confirmation.
-- `LOW`: One or more required repositories, branches, dependencies, or generated artifacts could not be inspected, or the feature request is materially ambiguous.
+- `LOW`: One or more required repositories, branches, dependencies, external dependencies, or generated artifacts could not be inspected, or the feature request is materially ambiguous.
 
 ## Required Output Format
 
@@ -267,7 +337,7 @@ Return exactly this structure:
 
 ```text
 SUPPORTED: TRUE|FALSE
-SCOPE: NONE|CLI|GECKO-API|GECKO-CONTROLLER|HO|HO-DEPENDENCY[, ...]
+SCOPE: NONE|CLI|GECKO-API|GECKO-CONTROLLER|HO|HO-DEPENDENCY|GCP-HCP-INFRA|EXTERNAL-DEPENDENCIES[, ...]
 LEVEL OF EFFORT: NONE|S|M|L|XL
 RISK: LOW|MEDIUM|HIGH
 CONFIDENCE: HIGH|MEDIUM|LOW
@@ -290,6 +360,7 @@ Good evidence:
 - `hypershift/api/hypershift/v1beta1/nodepool_types.go:123 - NodePool exposes the requested field for GCP.`
 - `gecko/platform-api/api/private/v1/nodepool_types.go:59 - Gecko exposes GCP node pool platform fields, but the requested field is absent.`
 - `gcp-hcp-ctl/pkg/nodepool/create.go:88 - CLI create payload does not accept a flag for the requested field.`
+- `gcp-hcp-infra/terraform/modules/region/gar-cache.tf:1 - Region infrastructure creates a GAR pull-through cache, but only for the configured source repository.`
 
 Avoid vague evidence:
 
@@ -329,3 +400,34 @@ EVIDENCE:
 ```
 
 This example is illustrative. Always inspect current code before returning an assessment.
+
+Example request:
+
+`Assess support for zero-egress worker nodes with all required images available in GAR.`
+
+Expected investigation:
+
+1. Search HyperShift for GCP worker networking, public IP control, NAT assumptions, image mirror APIs, ignition rendering, and tests.
+2. Search Gecko API/controllers for image mirror, release image rewrite, pull secret, and worker egress controls.
+3. Search `gcp-hcp-ctl` for no-NAT/no-public-IP and registry mirror flags or payloads.
+4. Search `gcp-hcp-infra` for GAR repositories, remote repositories, image rewrite admission, image mirroring/pre-warming pipelines, IAM, Secret Manager, Cloud NAT, and validation environments.
+5. Search GCP HCP design docs for image distribution, customer worker-node pull auth, and known zero-egress constraints.
+6. Identify external dependencies for OCP release payloads, operator catalogs, registries, Cincinnati, Konflux, GAR behavior, and any manual image-availability process.
+
+Example output shape:
+
+```text
+SUPPORTED: FALSE
+SCOPE: EXTERNAL-DEPENDENCIES, GCP-HCP-INFRA, HO, GECKO-API, GECKO-CONTROLLER, CLI
+LEVEL OF EFFORT: L
+RISK: HIGH
+CONFIDENCE: HIGH
+SUMMARY: HyperShift has generic image mirror support, but the complete zero-egress worker path is not supported because required OCP/operator image availability in GAR, customer worker-node pull authentication, no-NAT/no-public-IP behavior, Gecko exposure, and CLI controls are not all implemented. Existing GAR infrastructure must be distinguished from verified pre-publication or pre-warming of every required image.
+EVIDENCE:
+- hypershift/api/hypershift/v1beta1/hostedcluster_types.go:762 - HostedCluster exposes imageContentSources for node image mirrors.
+- gcp-hcp-infra/terraform/modules/commons/gar.tf:1 - Commons GAR hosts GCP HCP service images, not necessarily the full OCP release/operator image set.
+- gcp-hcp-infra/terraform/modules/region/gar-cache.tf:1 - Region infrastructure creates a GAR cache for gcp-hcp-images, not proof that all worker-required images are available beforehand.
+- gcp-hcp/design-decisions/automation/container-image-build-and-distribution-pipeline.md:237 - Customer worker nodes require a future WIF/OIDC token-exchange model for image pulls.
+- gecko/controllers/hc/manifest/manifests.go:274 - HostedCluster manifests set release image and pull secret but do not expose imageContentSources in this path.
+- gcp-hcp-ctl/pkg/infra/network/create.go:160 - CLI-managed network creation creates Cloud NAT.
+```
