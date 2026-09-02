@@ -1,6 +1,6 @@
 ---
 name: hcp-feature-support-assessment
-description: Assess GCP HCP feature support across HyperShift, Gecko, gcp-hcp-ctl, gcp-hcp-infra, HO dependencies, and external dependencies; use when asked for supportability, implementation scope, or level of effort for a feature request.
+description: Assess GCP HCP feature support across HyperShift, Gecko, gcphcpctl, gcp-hcp-infra, Hypershift dependencies, and external dependencies; use when asked for supportability, implementation scope, or level of effort for a feature request.
 ---
 
 # HCP Feature Support Assessment
@@ -73,11 +73,11 @@ Use when HyperShift already supports the feature through `HostedCluster`, `NodeP
 
 Typical scope:
 
-- `GECKO-API`
-- `GECKO-CONTROLLER`
-- `CLI`
+- `Gecko API`
+- `Gecko Controllers Manifests`
+- `gcphcpctl`
 
-In this category, `GECKO-CONTROLLER` means adapter plumbing that copies the field from Gecko API resources into HO resources. It does not mean a new service workflow, asynchronous orchestration, external API lookup, durable state machine, or complex reconciliation.
+In this category, `Gecko Controllers Manifests` means adapter plumbing or manifest-builder changes that copy fields from Gecko API resources into HyperShift `HostedCluster`, `NodePool`, `ManifestWork`, or related Kubernetes manifests. It does not mean a new service workflow, asynchronous orchestration, external API lookup, durable state machine, or complex reconciliation.
 
 ### Category 2: Gecko Or CLI Transform
 
@@ -85,13 +85,13 @@ Use when HyperShift already supports the target configuration, but customer inpu
 
 Typical scope:
 
-- `GECKO-API`
-- `GECKO-CONTROLLER`
-- `CLI`
+- `Gecko API`
+- `Gecko Controllers Manifests`
+- `gcphcpctl`
 
-If the transformation is purely client-side and does not need durable status, retries, credentials, or reconciliation, do not include `GECKO-CONTROLLER`.
+If the transformation is purely client-side and does not need durable status, retries, credentials, or reconciliation, do not include `Gecko Controllers Logic`.
 
-Include `GECKO-CONTROLLER` when the transformation requires external API calls, credentials, retries, cached state, status reporting, asynchronous completion, cross-resource coordination, or durable reconciliation.
+Include `Gecko Controllers Logic` when the transformation requires external API calls, credentials, retries, cached state, status reporting, asynchronous completion, cross-resource coordination, or durable reconciliation. Include `Gecko Controllers Manifests` separately if the reconciler or adapter must also change the rendered HyperShift-facing manifests.
 
 ### Category 3: Gecko Controller Or Service Logic
 
@@ -99,9 +99,10 @@ Use when the customer API requires non-trivial Gecko reconciliation or orchestra
 
 Typical scope:
 
-- `GECKO-API`
-- `GECKO-CONTROLLER`
-- `CLI`
+- `Gecko API`
+- `Gecko Controllers Logic`
+- `Gecko Controllers Manifests`
+- `gcphcpctl`
 
 ### Category 4: HyperShift Operator Implementation
 
@@ -109,10 +110,10 @@ Use when HyperShift does not currently expose or implement the feature, or when 
 
 Typical scope:
 
-- `HO`
-- Plus `GECKO-API`, `GECKO-CONTROLLER`, or `CLI` depending on the customer-facing exposure path.
+- `Hypershift Change`
+- Plus `Gecko API`, `Gecko Controllers Logic`, `Gecko Controllers Manifests`, or `gcphcpctl` depending on the customer-facing exposure path.
 
-Before adding `HO`, verify that existing HyperShift fields and controllers cannot already express the requested behavior.
+Before adding `Hypershift Change`, verify that existing HyperShift fields and controllers cannot already express the requested behavior.
 
 ### Category 5: HyperShift Dependency Implementation
 
@@ -120,11 +121,11 @@ Use when the work requires implementation in an HO dependency before HO can supp
 
 Typical scope:
 
-- `HO-DEPENDENCY`
-- `HO`
-- Plus `GECKO-API`, `GECKO-CONTROLLER`, or `CLI` depending on the exposure path.
+- `Hypershift Dependency Change`
+- `Hypershift Change`
+- Plus `Gecko API`, `Gecko Controllers Logic`, `Gecko Controllers Manifests`, or `gcphcpctl` depending on the exposure path.
 
-For dependency work, include upstream implementation, downstream/fork sync if applicable, dependency bump, HO integration, and Gecko/CLI exposure in the summary.
+For dependency work, include upstream implementation, downstream/fork sync if applicable, dependency bump, Hypershift integration, and Gecko/gcphcpctl exposure in the summary.
 
 ### Category 6: GCP HCP Infrastructure Or Platform Automation
 
@@ -132,8 +133,8 @@ Use when the feature requires GCP HCP-owned infrastructure, deployment automatio
 
 Typical scope:
 
-- `GCP-HCP-INFRA`
-- Plus `HO`, `GECKO-API`, `GECKO-CONTROLLER`, `CLI`, `HO-DEPENDENCY`, or `EXTERNAL-DEPENDENCIES` depending on the customer-facing path and prerequisites.
+- `Infra Configuration`
+- Plus `Hypershift Change`, `Gecko API`, `Gecko Controllers Logic`, `Gecko Controllers Manifests`, `gcphcpctl`, `Hypershift Dependency Change`, or `External Dependencies` depending on the customer-facing path and prerequisites.
 
 Do not treat an infrastructure resource as proof that the feature is ready. For example, a GAR repository or lazy pull-through cache does not prove required images are available beforehand unless repository evidence shows publication, mirroring, pre-warming, or validation for the required image set.
 
@@ -143,10 +144,10 @@ Use when support depends on systems or readiness gates outside the inspected GCP
 
 Typical scope:
 
-- `EXTERNAL-DEPENDENCIES`
-- Plus `GCP-HCP-INFRA`, `HO`, `GECKO-API`, `GECKO-CONTROLLER`, or `CLI` depending on where the platform must integrate the external readiness.
+- `External Dependencies`
+- Plus `Infra Configuration`, `Hypershift Change`, `Gecko API`, `Gecko Controllers Logic`, `Gecko Controllers Manifests`, or `gcphcpctl` depending on where the platform must integrate the external readiness.
 
-Use `HO-DEPENDENCY` for code dependencies HyperShift imports, vendors, releases, or bumps. Use `EXTERNAL-DEPENDENCIES` for hosted services, registries, release pipelines, catalogs, cloud-service behavior, org policies, or manual readiness gates.
+Use `Hypershift Dependency Change` for code dependencies HyperShift imports, vendors, releases, or bumps. Use `External Dependencies` for hosted services, registries, release pipelines, catalogs, cloud-service behavior, org policies, or manual readiness gates.
 
 ## Discovering HO Dependencies
 
@@ -180,14 +181,15 @@ Follow this order unless the request makes another order obviously better:
 3. Search HyperShift first for API fields, CRD schema, controller logic, validation, feature gates, docs, and tests related to the feature.
 4. Verify that the support applies to GCP specifically, not only to AWS, Azure, IBM Cloud, KubeVirt, Agent, or another platform.
 5. Search Gecko platform API for customer-facing types and generated public API fields.
-6. Search Gecko controllers for adapters or reconcilers that map Gecko API state to HyperShift `HostedCluster`, `NodePool`, or related resources.
-7. Search `gcp-hcp-ctl` for command flags, request payload construction, API client models, documentation, and tests.
-8. Search `gcp-hcp-infra` for Terraform, ArgoCD, Helm, pipeline, GAR, GKE, IAM, networking, Secret Manager, bootstrap, registration, deployment, and validation support when the feature touches platform infrastructure or operations.
-9. Search GCP HCP design docs and implementation plans for known decisions, constraints, or intended behavior.
-10. Discover and inspect dependency repositories only when HyperShift support appears blocked by provider, CAPI, cloud operator, or external component functionality.
-11. Discover and assess external dependencies when repository evidence shows that support depends on hosted services, registries, release metadata, operator catalogs, GCP product behavior, org policy, or manual readiness gates.
-12. Identify the minimum complete scope and level of effort.
-13. Report concise evidence with file paths and line numbers where possible.
+6. Search Gecko controller manifest builders and adapters that map Gecko API state to HyperShift `HostedCluster`, `NodePool`, `ManifestWork`, or related resources.
+7. Search Gecko controller logic for reconciliation, async workflows, status handling, retries, service integrations, validation, and cross-resource coordination.
+8. Search `gcp-hcp-ctl` for command flags, request payload construction, API client models, documentation, and tests.
+9. Search `gcp-hcp-infra` for Terraform, ArgoCD, Helm, pipeline, GAR, GKE, IAM, networking, Secret Manager, bootstrap, registration, deployment, and validation support when the feature touches platform infrastructure or operations.
+10. Search GCP HCP design docs and implementation plans for known decisions, constraints, or intended behavior.
+11. Discover and inspect dependency repositories only when HyperShift support appears blocked by provider, CAPI, cloud operator, or external component functionality.
+12. Discover and assess external dependencies when repository evidence shows that support depends on hosted services, registries, release metadata, operator catalogs, GCP product behavior, org policy, or manual readiness gates.
+13. Identify the minimum complete scope and level of effort.
+14. Report concise evidence with file paths and line numbers where possible.
 
 Do not implement code while using this skill unless the user explicitly asks for implementation. The primary output is an assessment.
 
@@ -208,9 +210,10 @@ Useful Gecko locations and patterns:
 
 - `platform-api/api/private/v1/*.go`
 - `platform-api/api/public/v1/*.go`
+- `controllers/**/manifest/**/*.go`
 - `controllers/**/*.go`
 - `orlop/**/*.go`
-- Search terms: feature name, public JSON field name, private type name, controller name, adapter name, `HostedCluster`, `NodePool`, `ManifestWork`, `VersionResolution`, `PlacementResult`.
+- Search terms: feature name, public JSON field name, private type name, controller name, adapter name, manifest builder input field, `HostedCluster`, `NodePool`, `ManifestWork`, `VersionResolution`, `PlacementResult`.
 
 Useful CLI locations and patterns:
 
@@ -257,19 +260,19 @@ External dependency indicators:
 
 ## Support Determination
 
-Set `SUPPORTED: TRUE` only when the complete customer-facing path already exists and appears usable without implementation in all required layers. This includes required GCP HCP infrastructure automation and external dependency readiness, not just HyperShift, Gecko, or CLI support.
+Set `SUPPORTED: TRUE` only when the complete customer-facing path already exists and appears usable without implementation in all required layers. This includes required GCP HCP infrastructure automation and external dependency readiness, not just HyperShift, Gecko, or gcphcpctl support.
 
 Set `SUPPORTED: FALSE` when inspected evidence shows any required layer is missing, when only partial feature support exists, when required GCP HCP infrastructure automation is missing, or when support depends on unimplemented upstream/provider/external work.
 
-If HyperShift supports the low-level capability but Gecko does not expose or pass it through, or the CLI does not expose it to users, report `SUPPORTED: FALSE` with scope `GECKO-API, GECKO-CONTROLLER, CLI` or the minimal applicable set.
+If HyperShift supports the low-level capability but Gecko does not expose or pass it through, or `gcphcpctl` does not expose it to users, report `SUPPORTED: FALSE` with scope `Gecko API, Gecko Controllers Manifests, gcphcpctl` or the minimal applicable set.
 
-If HyperShift supports the feature for another platform but not GCP, report `SUPPORTED: FALSE` and include `HO` or `HO-DEPENDENCY` if GCP platform support needs implementation.
+If HyperShift supports the feature for another platform but not GCP, report `SUPPORTED: FALSE` and include `Hypershift Change` or `Hypershift Dependency Change` if GCP platform support needs implementation.
 
 If one layer supports the feature but another required layer does not, report `SUPPORTED: FALSE` and list only the missing implementation scopes. Mention the existing support in `SUMMARY` or `EVIDENCE`.
 
-If infrastructure exists but the operational workflow, publication pipeline, environment rollout, validation, IAM, or content availability required by the feature is missing, report `SUPPORTED: FALSE` with `GCP-HCP-INFRA`.
+If infrastructure exists but the operational workflow, publication pipeline, environment rollout, validation, IAM, or content availability required by the feature is missing, report `SUPPORTED: FALSE` with `Infra Configuration`.
 
-If support depends on external service readiness or content availability that is not verifiable from inspected repository evidence, include `EXTERNAL-DEPENDENCIES` and lower confidence unless there is clear positive evidence.
+If support depends on external service readiness or content availability that is not verifiable from inspected repository evidence, include `External Dependencies` and lower confidence unless there is clear positive evidence.
 
 If a required repository, branch, or dependency could not be inspected, avoid a definitive positive assessment. Use `SUPPORTED: FALSE` only when inspected evidence shows a required layer is missing. Otherwise, report the assessment as partial in `SUMMARY`, set `CONFIDENCE: LOW`, and cite the missing source in `EVIDENCE`.
 
@@ -280,17 +283,20 @@ If the request is ambiguous, make the narrowest reasonable interpretation and in
 Use only these scope values:
 
 - `NONE`: no implementation needed.
-- `CLI`: `gcphcpctl` flags, commands, request payloads, output, docs, or tests.
-- `GECKO-API`: Gecko customer-facing API types, generated public API, validation, OpenAPI/CRDs, or API tests.
-- `GECKO-CONTROLLER`: Gecko reconciliation, adapters, orchestration, async state, status, retries, service integrations, or writes to HO resources.
-- `HO`: HyperShift API, validation, controllers, CPO/HO rendering, feature gates, tests, docs, or release payload integration.
-- `HO-DEPENDENCY`: CAPI provider, CAPI, cloud operator, upstream, downstream dependency, or release payload changes plus dependency bump/release work.
-- `GCP-HCP-INFRA`: Terraform, ArgoCD, Helm charts, pipelines, GAR/GKE/IAM/networking/Secret Manager, bootstrap, registration, platform environment setup, validation infrastructure, image distribution, or operational automation in `gcp-hcp-infra`.
-- `EXTERNAL-DEPENDENCIES`: Red Hat, GCP, or third-party hosted services; release services; registries; image/catalog availability; org policies; manual approval/readiness gates; or external process dependencies not represented as code in the inspected repositories.
+- `External Dependencies`: Red Hat, GCP, or third-party hosted services; release services; registries; image/catalog availability; org policies; manual approval/readiness gates; or external process dependencies not represented as code in the inspected repositories.
+- `Hypershift Dependency Change`: CAPI provider, CAPI, cloud operator, upstream, downstream dependency, or release payload changes plus dependency bump/release work.
+- `Hypershift Change`: HyperShift API, validation, controllers, CPO/HO rendering, feature gates, tests, docs, or release payload integration.
+- `Infra Configuration`: Terraform, ArgoCD, Helm charts, pipelines, GAR/GKE/IAM/networking/Secret Manager, bootstrap, registration, platform environment setup, validation infrastructure, image distribution, or operational automation in `gcp-hcp-infra`.
+- `Gecko API`: Gecko customer-facing API types, generated public API, validation, OpenAPI/CRDs, or API tests.
+- `Gecko Controllers Logic`: Gecko reconciliation, orchestration, async state, status, retries, service integrations, external API calls, placement decisions, version resolution, cross-resource coordination, or controller-owned validation/state transitions.
+- `Gecko Controllers Manifests`: Gecko adapter or manifest-builder changes that write fields into HyperShift `HostedCluster`, `NodePool`, `ManifestWork`, or related Kubernetes manifests without new durable controller behavior.
+- `gcphcpctl`: `gcphcpctl` flags, commands, request payloads, output, docs, or tests.
 
 When multiple scopes are needed, list them comma-separated in dependency order, for example:
 
-`SCOPE: EXTERNAL-DEPENDENCIES, HO-DEPENDENCY, HO, GCP-HCP-INFRA, GECKO-API, GECKO-CONTROLLER, CLI`
+`SCOPE: External Dependencies, Hypershift Dependency Change, Hypershift Change, Infra Configuration, Gecko API, Gecko Controllers Logic, Gecko Controllers Manifests, gcphcpctl`
+
+If `Gecko Controllers Manifests` depends on new `Gecko Controllers Logic`, list logic first. If the remaining Gecko controller work is pure passthrough or manifest generation, list only `Gecko Controllers Manifests`.
 
 ## Level Of Effort
 
@@ -299,7 +305,7 @@ When multiple scopes are needed, list them comma-separated in dependency order, 
 Use this rubric:
 
 - `NONE`: No implementation is needed because the complete customer-facing path is already supported and usable.
-- `S`: Mechanical passthrough, CLI flag, simple API exposure, adapter field copy, docs, or local tests. Can span multiple layers if no new behavior, transform, reconciliation, dependency bump, or complex validation is required.
+- `S`: Mechanical passthrough, gcphcpctl flag, simple API exposure, adapter field copy, docs, or local tests. Can span multiple layers if no new behavior, transform, reconciliation, dependency bump, or complex validation is required.
 - `M`: Multiple-layer implementation with generated API/client updates, moderate validation, simple transformation, version/channel normalization, moderate Terraform/Helm/API/configuration changes, or non-trivial but local tests. No new durable controller workflow, upstream dependency work, or external readiness dependency.
 - `L`: New HyperShift behavior, new Gecko reconciliation/service logic, lifecycle semantics, rollout/upgrade/replacement behavior, status handling, retries, external API interaction, new GCP HCP infrastructure automation, image mirroring/pre-warming workflow, IAM/network rollout, validation environments, or significant integration/e2e test work.
 - `XL`: Upstream/downstream dependency implementation, dependency release or bump chain, provider/CAPI/cloud-operator changes, release payload coordination, external release-chain or service changes, broad image supply-chain readiness across OCP payload/operator catalogs, or broad cross-repo work blocked on dependency or external availability.
@@ -308,18 +314,18 @@ Examples:
 
 - `NONE`: The requested feature is already exposed through HyperShift, Gecko API/controller plumbing, and `gcphcpctl` with no required implementation.
 - `S`: Add a `gcphcpctl` flag and copy an existing Gecko API field into a HyperShift `NodePool`.
-- `S`: Add Gecko API, controller passthrough, and CLI exposure for an existing HyperShift GCP field.
-- `M`: Add Gecko API, generated clients, validation, CLI payload support, and a simple transform before writing HyperShift resources.
-- `L`: Add Gecko reconciliation that calls an external API, persists status, retries, and coordinates cluster or node pool lifecycle.
-- `L`: Add GCP HCP infrastructure automation to mirror or pre-warm required images, configure GAR/IAM/networking, and validate zero-egress image pulls.
-- `XL`: Add missing CAPG/provider support, release it, bump HyperShift, implement HO integration, then expose it through Gecko and CLI.
-- `XL`: Coordinate external release-service, registry, or operator-catalog changes before GCP HCP can automate consumption.
+- `S`: Add Gecko API, Gecko Controllers Manifests passthrough, and gcphcpctl exposure for an existing HyperShift GCP field.
+- `M`: Add Gecko API, generated clients, validation, gcphcpctl payload support, and a simple transform before writing HyperShift resources.
+- `L`: Add Gecko Controllers Logic that calls an external API, persists status, retries, and coordinates cluster or node pool lifecycle.
+- `L`: Add Infra Configuration to mirror or pre-warm required images, configure GAR/IAM/networking, and validate zero-egress image pulls.
+- `XL`: Add missing CAPG/provider support, release it, bump HyperShift, implement Hypershift Change integration, then expose it through Gecko and gcphcpctl.
+- `XL`: Coordinate External Dependencies such as release-service, registry, or operator-catalog changes before GCP HCP can automate consumption.
 
 ## Risk
 
 Use this rubric:
 
-- `LOW`: Mechanical field passthrough, local validation, CLI/docs updates, no customer-visible lifecycle behavior change, no dependency or release-chain uncertainty.
+- `LOW`: Mechanical field passthrough, local validation, gcphcpctl/docs updates, no customer-visible lifecycle behavior change, no dependency or release-chain uncertainty.
 - `MEDIUM`: Public API compatibility concerns, generated clients, moderate validation, uncertain rollout behavior, coordinated Terraform/ArgoCD/Helm changes, multiple repos needing coordinated changes, or integration/e2e coverage needed.
 - `HIGH`: Upgrade or replacement semantics, long-running orchestration, credentials or external service calls, dependency release chain, production migration, provider limitations, image supply-chain availability, customer-project pull authentication, zero-egress validation, registry/service availability, org policy constraints, external/manual readiness gates, or incomplete evidence for a critical required layer.
 
@@ -337,7 +343,7 @@ Return exactly this structure:
 
 ```text
 SUPPORTED: TRUE|FALSE
-SCOPE: NONE|CLI|GECKO-API|GECKO-CONTROLLER|HO|HO-DEPENDENCY|GCP-HCP-INFRA|EXTERNAL-DEPENDENCIES[, ...]
+SCOPE: NONE|External Dependencies|Hypershift Dependency Change|Hypershift Change|Infra Configuration|Gecko API|Gecko Controllers Logic|Gecko Controllers Manifests|gcphcpctl[, ...]
 LEVEL OF EFFORT: NONE|S|M|L|XL
 RISK: LOW|MEDIUM|HIGH
 CONFIDENCE: HIGH|MEDIUM|LOW
@@ -359,7 +365,7 @@ Good evidence:
 
 - `hypershift/api/hypershift/v1beta1/nodepool_types.go:123 - NodePool exposes the requested field for GCP.`
 - `gecko/platform-api/api/private/v1/nodepool_types.go:59 - Gecko exposes GCP node pool platform fields, but the requested field is absent.`
-- `gcp-hcp-ctl/pkg/nodepool/create.go:88 - CLI create payload does not accept a flag for the requested field.`
+- `gcp-hcp-ctl/pkg/nodepool/create.go:88 - gcphcpctl create payload does not accept a flag for the requested field.`
 - `gcp-hcp-infra/terraform/modules/region/gar-cache.tf:1 - Region infrastructure creates a GAR pull-through cache, but only for the configured source repository.`
 
 Avoid vague evidence:
@@ -387,11 +393,11 @@ Example output shape:
 
 ```text
 SUPPORTED: FALSE
-SCOPE: GECKO-CONTROLLER, CLI
+SCOPE: Gecko Controllers Manifests, gcphcpctl
 LEVEL OF EFFORT: S
 RISK: LOW
 CONFIDENCE: HIGH
-SUMMARY: HyperShift and Gecko expose GCP node pool resource labels, but the assessment did not find adapter plumbing or CLI payload wiring for customers to set them. The remaining work is passthrough wiring from Gecko to HO plus a CLI flag and unit coverage.
+SUMMARY: HyperShift and Gecko expose GCP node pool resource labels, but the assessment did not find adapter plumbing or gcphcpctl payload wiring for customers to set them. The remaining work is passthrough wiring from Gecko to HyperShift plus a gcphcpctl flag and unit coverage.
 EVIDENCE:
 - hypershift/api/hypershift/v1beta1/gcp.go:467 - GCP node pool platform spec includes resource labels.
 - gecko/platform-api/api/private/v1/nodepool_types.go:79 - Gecko node pool GCP platform spec includes resource labels.
@@ -418,16 +424,16 @@ Example output shape:
 
 ```text
 SUPPORTED: FALSE
-SCOPE: EXTERNAL-DEPENDENCIES, GCP-HCP-INFRA, HO, GECKO-API, GECKO-CONTROLLER, CLI
+SCOPE: External Dependencies, Infra Configuration, Hypershift Change, Gecko API, Gecko Controllers Logic, Gecko Controllers Manifests, gcphcpctl
 LEVEL OF EFFORT: L
 RISK: HIGH
 CONFIDENCE: HIGH
-SUMMARY: HyperShift has generic image mirror support, but the complete zero-egress worker path is not supported because required OCP/operator image availability in GAR, customer worker-node pull authentication, no-NAT/no-public-IP behavior, Gecko exposure, and CLI controls are not all implemented. Existing GAR infrastructure must be distinguished from verified pre-publication or pre-warming of every required image.
+SUMMARY: HyperShift has generic image mirror support, but the complete zero-egress worker path is not supported because required OCP/operator image availability in GAR, customer worker-node pull authentication, no-NAT/no-public-IP behavior, Gecko exposure, and gcphcpctl controls are not all implemented. Existing GAR infrastructure must be distinguished from verified pre-publication or pre-warming of every required image.
 EVIDENCE:
 - hypershift/api/hypershift/v1beta1/hostedcluster_types.go:762 - HostedCluster exposes imageContentSources for node image mirrors.
 - gcp-hcp-infra/terraform/modules/commons/gar.tf:1 - Commons GAR hosts GCP HCP service images, not necessarily the full OCP release/operator image set.
 - gcp-hcp-infra/terraform/modules/region/gar-cache.tf:1 - Region infrastructure creates a GAR cache for gcp-hcp-images, not proof that all worker-required images are available beforehand.
 - gcp-hcp/design-decisions/automation/container-image-build-and-distribution-pipeline.md:237 - Customer worker nodes require a future WIF/OIDC token-exchange model for image pulls.
 - gecko/controllers/hc/manifest/manifests.go:274 - HostedCluster manifests set release image and pull secret but do not expose imageContentSources in this path.
-- gcp-hcp-ctl/pkg/infra/network/create.go:160 - CLI-managed network creation creates Cloud NAT.
+- gcp-hcp-ctl/pkg/infra/network/create.go:160 - gcphcpctl-managed network creation creates Cloud NAT.
 ```
