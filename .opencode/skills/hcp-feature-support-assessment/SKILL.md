@@ -36,7 +36,11 @@ Before assessing supportability:
 
 When using opencode tools from the `gcp-hcp` repository, remember that `Glob` and `Grep` default to the current repository. Pass the target repository path explicitly when searching sibling clones.
 
+When using remote sources, prefer raw source files or fetched repository files that preserve line numbers. If line numbers cannot be verified remotely, cite the file path and state that line-level evidence was unavailable.
+
 For broad cross-repo exploration, use the `Task` tool with `subagent_type="explore"` and point each task at one repository. Ask each subagent to return only evidence relevant to the requested feature, including file paths, line numbers, positive findings, and missing areas searched.
+
+If the `Task` tool or `explore` subagent is unavailable, fall back to direct `Glob`, `Grep`, `Read`, and `webfetch` calls while preserving the same evidence standards.
 
 Run cross-repo searches in parallel when possible:
 
@@ -193,7 +197,7 @@ Dependency indicators:
 
 Set `SUPPORTED: TRUE` only when the complete customer-facing path already exists and appears usable without implementation in all required layers. This means HyperShift support alone is not enough if Gecko API or CLI exposure is required by the requested product surface.
 
-Set `SUPPORTED: FALSE` when any required layer is missing, when only partial support exists, or when support depends on unimplemented upstream/provider work.
+Set `SUPPORTED: FALSE` when inspected evidence shows any required layer is missing, when only partial feature support exists, or when support depends on unimplemented upstream/provider work.
 
 If HyperShift supports the low-level capability but Gecko does not expose or pass it through, or the CLI does not expose it to users, report `SUPPORTED: FALSE` with scope `GECKO-API, GECKO-CONTROLLER, CLI` or the minimal applicable set.
 
@@ -201,7 +205,7 @@ If HyperShift supports the feature for another platform but not GCP, report `SUP
 
 If one layer supports the feature but another required layer does not, report `SUPPORTED: FALSE` and list only the missing implementation scopes. Mention the existing support in `SUMMARY` or `EVIDENCE`.
 
-If a required repository could not be inspected, avoid a definitive positive assessment. Use `SUPPORTED: FALSE` when required evidence is missing, or state that the result is partial if the user asked for best-effort triage.
+If a required repository, branch, or dependency could not be inspected, avoid a definitive positive assessment. Use `SUPPORTED: FALSE` only when inspected evidence shows a required layer is missing. Otherwise, report the assessment as partial in `SUMMARY`, set `CONFIDENCE: LOW`, and cite the missing source in `EVIDENCE`.
 
 If the request is ambiguous, make the narrowest reasonable interpretation and include the assumption in `SUMMARY`. Ask a short clarification question only when the ambiguity changes the scope materially.
 
@@ -222,14 +226,40 @@ When multiple scopes are needed, list them comma-separated in dependency order, 
 
 ## Level Of Effort
 
+`SCOPE` describes where code must change. `LEVEL OF EFFORT` describes how hard the implementation is. Do not increase LOE only because several scope values are listed; increase it based on the hardest required behavior. Missing evidence lowers confidence, not necessarily effort.
+
 Use this rubric:
 
-- `S`: Straightforward passthrough across API, adapter plumbing, or CLI; no new complex controller logic; no new dependency; tests are local and obvious.
-- `M`: Multiple layers need updates, or a simple transform/validation/generation path is required; no new long-running controller/service workflow; no upstream dependency work.
-- `L`: New HO behavior, new Gecko controller/service logic, multi-resource orchestration, upgrade/rollout semantics, significant validation, or complex tests are required.
-- `XL`: Any upstream/downstream dependency implementation and release chain, or broad cross-repo work spanning dependency, HO, Gecko controller, API, CLI, and e2e validation.
+- `NONE`: No implementation is needed because the complete customer-facing path is already supported and usable.
+- `S`: Mechanical passthrough, CLI flag, simple API exposure, adapter field copy, docs, or local tests. Can span multiple layers if no new behavior, transform, reconciliation, dependency bump, or complex validation is required.
+- `M`: Multiple-layer implementation with generated API/client updates, moderate validation, simple transformation, version/channel normalization, or non-trivial but local tests. No new durable controller workflow or upstream dependency work.
+- `L`: New HyperShift behavior, new Gecko reconciliation/service logic, lifecycle semantics, rollout/upgrade/replacement behavior, status handling, retries, external API interaction, or significant integration/e2e test work.
+- `XL`: Upstream/downstream dependency implementation, dependency release or bump chain, provider/CAPI/cloud-operator changes, release payload coordination, or broad cross-repo work blocked on dependency availability.
 
-Choose the higher LOE when evidence points to uncertainty, rollout risk, API compatibility concerns, or missing dependency support.
+Examples:
+
+- `NONE`: The requested feature is already exposed through HyperShift, Gecko API/controller plumbing, and `gcphcpctl` with no required implementation.
+- `S`: Add a `gcphcpctl` flag and copy an existing Gecko API field into a HyperShift `NodePool`.
+- `S`: Add Gecko API, controller passthrough, and CLI exposure for an existing HyperShift GCP field.
+- `M`: Add Gecko API, generated clients, validation, CLI payload support, and a simple transform before writing HyperShift resources.
+- `L`: Add Gecko reconciliation that calls an external API, persists status, retries, and coordinates cluster or node pool lifecycle.
+- `XL`: Add missing CAPG/provider support, release it, bump HyperShift, implement HO integration, then expose it through Gecko and CLI.
+
+## Risk
+
+Use this rubric:
+
+- `LOW`: Mechanical field passthrough, local validation, CLI/docs updates, no customer-visible lifecycle behavior change, no dependency or release-chain uncertainty.
+- `MEDIUM`: Public API compatibility concerns, generated clients, moderate validation, uncertain rollout behavior, multiple repos needing coordinated changes, or integration/e2e coverage needed.
+- `HIGH`: Upgrade or replacement semantics, long-running orchestration, credentials or external service calls, dependency release chain, production migration, provider limitations, or incomplete evidence for a critical required layer.
+
+## Confidence
+
+Use this rubric:
+
+- `HIGH`: All required repositories and relevant branches were inspected locally or remotely, and evidence covers positive and negative findings.
+- `MEDIUM`: Most required layers were inspected, but some evidence is indirect, generated, stale, or missing line-level confirmation.
+- `LOW`: One or more required repositories, branches, dependencies, or generated artifacts could not be inspected, or the feature request is materially ambiguous.
 
 ## Required Output Format
 
@@ -238,8 +268,10 @@ Return exactly this structure:
 ```text
 SUPPORTED: TRUE|FALSE
 SCOPE: NONE|CLI|GECKO-API|GECKO-CONTROLLER|HO|HO-DEPENDENCY[, ...]
-LEVEL OF EFFORT: S|M|L|XL
-SUMMARY: One or two sentences explaining current support and what is needed.
+LEVEL OF EFFORT: NONE|S|M|L|XL
+RISK: LOW|MEDIUM|HIGH
+CONFIDENCE: HIGH|MEDIUM|LOW
+SUMMARY: One or two sentences explaining current support, what is needed, and whether the assessment is complete or partial.
 EVIDENCE:
 - repo-relative/path:line - concise finding
 - repo-relative/path:line - concise finding
@@ -286,6 +318,8 @@ Example output shape:
 SUPPORTED: FALSE
 SCOPE: GECKO-CONTROLLER, CLI
 LEVEL OF EFFORT: S
+RISK: LOW
+CONFIDENCE: HIGH
 SUMMARY: HyperShift and Gecko expose GCP node pool resource labels, but the assessment did not find adapter plumbing or CLI payload wiring for customers to set them. The remaining work is passthrough wiring from Gecko to HO plus a CLI flag and unit coverage.
 EVIDENCE:
 - hypershift/api/hypershift/v1beta1/gcp.go:467 - GCP node pool platform spec includes resource labels.
